@@ -32,6 +32,24 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
   - Actions: `start` = `up -d --remove-orphans` with `-f` files if all config files are
     readable in the container, else `compose start`. `stop`/`restart` = plain compose.
     Stopping `SELF_PROJECT` is refused.
+  - `COMPOSE_DIR` stacks (`discover_stacks()`, re-scanned per request): every
+    `docker-compose-<key>.yaml` → one stack; `run-*.cmd` is parsed with `shlex`
+    (never executed) for `-p/-f/--project-directory/--env-file/--profile`, matched
+    via its `-f`. `stack_args()` builds the compose args. Stacks are merged into
+    `/api/projects` by project name (`stack` field); stacks without containers get
+    state `absent`. `up`/`down` only for stacks; Start on a stack = plain `start`.
+  - File editor: `/api/files/{fname}` GET/PUT, only `COMPOSE_FILE_RE` / `ENV_FILE_RE`
+    names directly in `COMPOSE_DIR` (no `/`). PUT: sha256 conflict check (409),
+    `docker compose config -q` with a temp copy substituted (422 unless `force`),
+    `POST /api/files/{fname}/validate` = same check without saving (`checked: false`
+    if no stack uses the file via `-f` / `--env-file`),
+    backup to `.compose-manager-backup/`, in-place write (keeps owner/mode).
+  - Backups: `backup_file()` before every PUT → `<fname>.<%Y%m%d-%H%M%S-%f>` (older
+    ones without `-%f` are still recognised, `BACKUP_ID_RE`), pruned to `BACKUP_KEEP`
+    (env, default 10). Timestamps in names are container time (UTC); the UI shows
+    mtime. `GET /api/files/{fname}/backups[/{id}]`. Restore has no endpoint on purpose:
+    the UI loads the backup into the editor and the normal Save writes it (so the
+    current version gets backed up, conflict check + validation still apply).
   - Logs: SSE (`StreamingResponse`), JSON-encoded lines, `event: end` when the process
     exits, `: ping` keep-alive every 15 s; subprocess is killed on client disconnect.
   - Validation: project names `^[a-z0-9][a-z0-9_-]*$`, must exist in `compose ls`;
@@ -45,19 +63,36 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
     template strings (always `esc()` user/docker data!). Event delegation via
     `data-act` attributes. `loadStats()` runs in parallel with `loadProjects()`.
     Refresh every 10 s; every 2 s while any project is `starting`.
-    localStorage keys: `open`, `stateFilter`.
+    localStorage keys: `open`, `stateFilter`. Single-column card list.
+    Editor overlay (`#editor`, `ed` object) reuses the log view layout; back button /
+    `popstate` closes overlays, unsaved changes are confirmed.
+    Action output (card and editor) = `.outbox`: collapsible (▾) and closable (✕).
+  - `editor.js`: `CodeEditor.create(root, textarea)` — dependency-free code editor:
+    transparent `<textarea>` over a highlighted `<pre>` + line-number gutter, synced by
+    `transform` on scroll. Line-based YAML / .env highlighters (`highlightYaml`,
+    `highlightEnv`; output must round-trip to the exact source text, or the caret
+    drifts — test by stripping tags in node). YAML helpers: auto-indent after `key:`,
+    list continuation, Tab/Shift+Tab block indent, Ctrl+/ comment, Backspace removes
+    2-space indent, TAB chars marked. Edits go through `execCommand("insertText")` to
+    keep undo. Wrap mode hides the gutter. Font 15px, 16px ≤ 720px (iOS zooms
+    into inputs below 16px). 🕘 button → backup list panel (`#ed-backups`, `ed.backup`). No CDN/library on purpose (offline PWA,
+    no build step).
   - `sw.js`: network-first for the shell, never caches `/api/`.
     **Bump `CACHE` (`compose-manager-vN`) whenever static files change.**
 - `Dockerfile`: `python:3.13-slim` + docker CLI and compose plugin copied from `docker:cli`.
 - `docker-compose.yml`: mounts docker.sock and `/opt`, `/home` read-only **at the same
   path** (needed for `up -d` with the original compose files). Port `${PORT:-8095}`.
+  `${COMPOSE_DIR:-/docker-compose}` is mounted **read-write**, same path.
 
 ## Host environment (as of 2026-11)
 
-- Host: Debian, Docker 29.x, Compose v5.x. 12 CPUs, 16 GB RAM.
+- Host: Debian, Docker 29.x, Compose v5.x.
 - Host ports 8080 and 8090 are taken → default 8095.
-- Existing compose projects live under `/opt/...` and `/home/vinyo/...`
-  (e.g. paperless, jellyfin as project `opt`, webtop, runner, reservation).
+- Existing compose projects: `/docker-compose/docker-compose-*.yaml` started via
+  `run-*.cmd` (frigate, immich-app, gitea-runner, scp-server; immich's YAML says
+  `name: immich` but runs as `-p immich-app`), `/docker-iac/<name>/docker-compose.yaml`
+  (forgejo, haproxy, openbao, semaphore, vaultwarden, directory-list),
+  this app at `/opt/compose-manager`. `.env-*` files contain secrets — don't print them.
 - **Never stop/restart the user's real projects for testing.**
 - No `node` on the host. For JS syntax checks use the locally available image
   (no pull needed):
@@ -81,6 +116,11 @@ docker rm -f cm-test        # always clean up
 docker compose -p cmtest down
 ```
 
+For `COMPOSE_DIR` tests: put a `docker-compose-cmtest.yaml`, `run-cmtest.cmd` and
+`.env-cmtest` into a scratchpad dir and run the test container with
+`-e COMPOSE_DIR=<dir> -v <dir>:<dir>`. Real `/docker-compose` may be mounted `:ro`
+for read-only discovery checks (GET only).
+
 Useful dummy project: a busybox `web` service with a healthcheck that becomes healthy
 after ~8 s, a plain `worker`, and an `init` service that exits 0 — covers the
 starting → running transition and the "exited 0 is fine" rule.
@@ -92,9 +132,9 @@ unless asked — tell them the command instead.
 
 - `stop` instead of `down`: projects are discovered from container labels; after
   `down` they would vanish from the list.
-- Start uses `up -d` (applies compose file changes). Open question offered to the
-  user, not yet answered: switch Start to plain `compose start` and add a separate
-  "Up / update" button.
+- Start uses `up -d` (applies compose file changes) for projects outside
+  `COMPOSE_DIR`; for `COMPOSE_DIR` stacks there is a separate Up button, so Start is
+  plain `compose start` there.
 - Green only when truly started: healthcheck `healthy`, or no healthcheck and running
   ≥ `START_GRACE_SEC`. Exit code 0 containers don't count as failures.
 - CPU % is per core (100 % = 1 core), as `docker stats` reports it; bars are
@@ -103,6 +143,6 @@ unless asked — tell them the command instead.
 
 ## Ideas / possible next steps
 
-Mentioned to the user, not requested yet: `down` button + discovering compose files
-on disk (so `down`ed / never-started projects appear), pull & recreate, view compose
-file / `.env`, separate "Up" button (see open question above).
+Mentioned to the user, not requested yet: pull & recreate, creating a new stack /
+new `.env-*` file from the UI, Up/Down/edit for projects outside `COMPOSE_DIR`
+(e.g. `/docker-iac`), search/replace in the editor.

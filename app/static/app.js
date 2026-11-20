@@ -16,6 +16,7 @@ const state = {
 
 const STATE_LABEL = {
   running: "fut", starting: "indul…", unhealthy: "unhealthy", partial: "részben fut", stopped: "leállítva",
+  absent: "nincs konténer",
 };
 const FAST_REFRESH_MS = 2000; // amíg valami indul
 
@@ -38,7 +39,7 @@ async function api(path, opts = {}) {
   try { body = await r.json(); } catch { /* nincs json */ }
   if (!r.ok) {
     const msg = body?.detail || body?.output || `HTTP ${r.status}`;
-    const e = new Error(msg); e.body = body; throw e;
+    const e = new Error(msg); e.body = body; e.status = r.status; throw e;
   }
   return body;
 }
@@ -146,7 +147,21 @@ function containerStatsHtml(project, cname) {
   </div>`;
 }
 
+function stackInfoHtml(p) {
+  const s = p.stack;
+  const files = s.editable.map((f) =>
+    `<button class="file-link" data-act="edit" data-name="${esc(p.name)}" data-file="${esc(f)}">✎ ${esc(f)}</button>`).join(" ");
+  return `<div class="kv"><span class="lbl">Parancs</span> <code>docker ${esc(s.command)}</code></div>
+    <div class="kv"><span class="lbl">Fájlok</span> ${files}</div>
+    <div class="kv"><span class="lbl">Forrás</span> ${s.runFile
+      ? `<code>${esc(s.runFile)}</code>`
+      : '<span class="muted">nincs run-*.cmd – alapértelmezett beállítások</span>'}</div>`;
+}
+
 function summaryHtml(p) {
+  if (p.state === "absent") {
+    return `<div class="summary"><p class="muted">A projektnek nincs konténere (down után, vagy még nem indult). Indítás: ⬆ Up.</p>${stackInfoHtml(p)}</div>`;
+  }
   const st = state.stats?.projects?.[p.name];
   const svcs = Array.isArray(state.services[p.name]) ? state.services[p.name] : [];
   const ports = [...new Set(svcs.flatMap((s) => (s.ports || [])
@@ -154,7 +169,7 @@ function summaryHtml(p) {
   const unhealthy = svcs.filter((s) => s.health && s.health !== "healthy").length;
   const images = [...new Set(svcs.map((s) => s.image))].length;
   if (!st) {
-    return `<div class="summary muted">${state.stats ? "Nincs statisztika" : "Statisztika betöltése…"}</div>`;
+    return `<div class="summary"><p class="muted">${state.stats ? "Nincs statisztika" : "Statisztika betöltése…"}</p>${p.stack ? stackInfoHtml(p) : ""}</div>`;
   }
   const ncpu = state.stats.ncpu || 1;
   const memTotal = state.stats.memTotal || 0;
@@ -170,7 +185,7 @@ function summaryHtml(p) {
       ${tile("Folyamatok", st.pids, `${images} image`)}
     </div>
     ${ports.length ? `<div class="kv"><span class="lbl">Portok</span> ${ports.map((x) => `<code>${esc(x)}</code>`).join(" ")}</div>` : ""}
-    <div class="kv"><span class="lbl">Fájl</span> <code>${esc(p.configFiles.join(", "))}</code>${p.filesAvailable ? "" : ' <span class="muted">(nem elérhető a konténerből)</span>'}</div>
+    ${p.stack ? stackInfoHtml(p) : `<div class="kv"><span class="lbl">Fájl</span> <code>${esc(p.configFiles.join(", "))}</code>${p.filesAvailable ? "" : ' <span class="muted">(nem elérhető a konténerből)</span>'}</div>`}
   </div>`;
 }
 
@@ -186,7 +201,7 @@ const STATE_FILTERS = {
   running: ["Fut", ["running"]],
   starting: ["Indul", ["starting"]],
   problem: ["Hibás", ["unhealthy", "partial"]],
-  stopped: ["Leállítva", ["stopped"]],
+  stopped: ["Leállítva", ["stopped", "absent"]],
 };
 
 function renderChips(byName) {
@@ -223,7 +238,10 @@ function render() {
     const open = state.open.has(p.name);
     const out = state.output[p.name];
     const n = esc(p.name);
-    const startTitle = p.filesAvailable ? "docker compose up -d" : "docker compose start (compose fájl nem elérhető)";
+    const absent = p.state === "absent";
+    const startTitle = p.stack ? "docker compose start"
+      : p.filesAvailable ? "docker compose up -d" : "docker compose start (compose fájl nem elérhető)";
+    const badgeCount = p.status ? " · " + esc(p.status.replace(/[a-z]+\((\d+)\)/g, "$1").replace(/,\s*/g, "/")) : "";
     return `<article class="card ${open ? "open" : ""}">
       <div class="card-head" data-act="toggle" data-name="${n}">
         <span class="dot ${busy ? "busy" : p.state}"></span>
@@ -232,16 +250,28 @@ function render() {
           <span class="muted path">${esc(p.configFiles.join(", "))}</span>
           ${headStatsHtml(p)}
         </div>
-        <span class="badge ${p.state}" title="${esc(p.status)}">${busy ? esc(busy) + "…" : esc(STATE_LABEL[p.state])} · ${esc(p.status.replace(/[a-z]+\((\d+)\)/g, "$1").replace(/,\s*/g, "/"))}</span>
+        <span class="badge ${p.state}" title="${esc(p.status)}">${busy ? esc(busy) + "…" : esc(STATE_LABEL[p.state])}${badgeCount}</span>
         <span class="chev">›</span>
       </div>
       <div class="actions">
-        <button class="btn start" data-act="start" data-name="${n}" title="${esc(startTitle)}" ${busy || p.state === "running" || p.state === "starting" ? "disabled" : ""}>▶ Start</button>
-        <button class="btn stop" data-act="stop" data-name="${n}" ${busy || p.state === "stopped" || p.self ? "disabled" : ""}>■ Stop</button>
-        <button class="btn restart" data-act="restart" data-name="${n}" ${busy || p.state === "stopped" ? "disabled" : ""}>↻ Restart</button>
-        <button class="btn logs" data-act="logs" data-name="${n}">☰ Log</button>
+        <button class="btn start" data-act="start" data-name="${n}" title="${esc(startTitle)}" ${busy || absent || p.state === "running" || p.state === "starting" ? "disabled" : ""}>▶ Start</button>
+        <button class="btn stop" data-act="stop" data-name="${n}" ${busy || absent || p.state === "stopped" || p.self ? "disabled" : ""}>■ Stop</button>
+        <button class="btn restart" data-act="restart" data-name="${n}" ${busy || absent || p.state === "stopped" ? "disabled" : ""}>↻ Restart</button>
+        <button class="btn logs" data-act="logs" data-name="${n}" ${absent ? "disabled" : ""}>☰ Log</button>
       </div>
-      ${out ? `<pre class="output ${out.ok ? "" : "err"}" data-act="clear-output" data-name="${n}">${esc(out.text)}</pre>` : ""}
+      ${p.stack ? `<div class="actions stack-actions">
+        <button class="btn up" data-act="up" data-name="${n}" title="${esc("docker " + p.stack.command + " up -d --remove-orphans")}" ${busy ? "disabled" : ""}>⬆ Up</button>
+        <button class="btn down" data-act="down" data-name="${n}" title="${esc("docker " + p.stack.command + " down --remove-orphans")}" ${busy || absent || p.self ? "disabled" : ""}>⬇ Down</button>
+        <button class="btn edit" data-act="edit" data-name="${n}">✎ Szerkesztés</button>
+      </div>` : ""}
+      ${out ? `<div class="outbox ${out.ok ? "ok" : "err"} ${out.collapsed ? "collapsed" : ""}">
+        <div class="outbox-head" data-act="out-toggle" data-name="${n}">
+          <span class="outbox-title">${out.ok ? "✓" : "✗"} ${esc(out.title || "kimenet")}</span>
+          <button class="outbox-btn" data-act="out-toggle" data-name="${n}" title="Összecsuk / kinyit">${out.collapsed ? "▸" : "▾"}</button>
+          <button class="outbox-btn" data-act="clear-output" data-name="${n}" title="Bezárás" aria-label="Bezárás">✕</button>
+        </div>
+        <pre class="outbox-body">${esc(out.text)}</pre>
+      </div>` : ""}
       ${open ? summaryHtml(p) + serviceHtml(p) : ""}
     </article>`;
   }).join("");
@@ -251,6 +281,7 @@ function render() {
 const CONFIRM = {
   stop: (n) => `Leállítod a(z) „${n}” projektet?`,
   restart: (n) => `Újraindítod a(z) „${n}” projektet?`,
+  down: (n) => `docker compose down: leállítod és TÖRLÖD a(z) „${n}” konténereit és hálózatait?\n(A volume-ok és a ./data könyvtár megmaradnak.)`,
 };
 
 async function doAction(name, action) {
@@ -262,10 +293,10 @@ async function doAction(name, action) {
     const r = await api(`api/projects/${encodeURIComponent(name)}/${action}`, { method: "POST" });
     toast(`${name}: ${r.command} kész`);
     const text = r.output.trim();
-    if (text) state.output[name] = { ok: true, text };
+    if (text) state.output[name] = { ok: true, text, title: r.command };
   } catch (e) {
     toast(`${name}: hiba`, true);
-    state.output[name] = { ok: false, text: e.body?.output || e.message };
+    state.output[name] = { ok: false, text: e.body?.output || e.message, title: `${action}: hiba` };
   } finally {
     delete state.busy[name];
     await loadProjects();
@@ -390,14 +421,262 @@ function closeLogs(fromPopstate = false) {
   if (!fromPopstate && history.state?.logs) history.back();
 }
 
+
+// ------------------------------------------------------------------ szerkesztő
+const ed = { name: null, file: null, hash: "", orig: "", busy: false, backup: null };
+const edText = $("#ed-text");
+const cm = CodeEditor.create($("#ed-code"), edText);
+cm.onCursor = (line, col) => { $("#ed-pos").textContent = `${line}:${col}`; };
+
+const edDirty = () => ed.file !== null && edText.value !== ed.orig;
+
+function edUpdate() {
+  const dirty = edDirty();
+  $("#ed-state").textContent = ed.busy ? "…" : dirty ? "● módosítva" : "mentve";
+  $("#ed-state").classList.toggle("dirty", dirty);
+  $("#ed-save").disabled = ed.busy || !dirty;
+  $("#ed-save-up").disabled = ed.busy;
+  $("#ed-check").disabled = ed.busy;
+  $("#ed-state").textContent = ed.busy ? "…" : ed.backup && dirty ? "🕘 korábbi változat – nincs mentve"
+    : dirty ? "● módosítva" : "mentve";
+}
+
+function edOutput(text, kind = "", title = "") {
+  const o = $("#ed-output");
+  o.querySelector(".outbox-body").textContent = text || "";
+  o.querySelector(".outbox-title").textContent = title || (kind === "err" ? "✗ Hiba" : kind === "ok" ? "✓ Kész" : "Kimenet");
+  o.className = `outbox ed-output ${kind}${text ? "" : " hidden"}`;
+  // "line 12" a hibaüzenetben -> sor jelölése (csak az aktuális fájlra vonatkozó hibánál)
+  let line = 0;
+  if (kind === "err" && ed.file && text.includes(ed.file)) {
+    const m = text.match(/line (\d+)/);
+    if (m) line = +m[1];
+  }
+  cm.setError(line);
+  o.dataset.line = line || "";
+}
+
+async function openEditor(name, file) {
+  const p = state.projects.find((x) => x.name === name);
+  if (!p?.stack) return;
+  ed.name = name;
+  ed.file = null;
+  $("#ed-project").textContent = name;
+  $("#ed-file").innerHTML = p.stack.editable.map((f) => `<option value="${esc(f)}">${esc(f)}</option>`).join("");
+  $("#editor").classList.remove("hidden");
+  $("#editor").setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
+  history.pushState({ editor: name }, "");
+  await edLoad(file || p.stack.editable[0]);
+}
+
+async function edLoad(fname) {
+  if (edDirty() && !confirm("Mentetlen módosítások – eldobod?")) {
+    $("#ed-file").value = ed.file;
+    return;
+  }
+  ed.busy = true; edUpdate();
+  edOutput("");
+  try {
+    const r = await api(`api/files/${encodeURIComponent(fname)}`);
+    ed.file = fname; ed.hash = r.hash; ed.orig = r.content; ed.backup = null;
+    $("#ed-backups").classList.add("hidden");
+    edText.value = r.content;
+    edText.scrollTop = 0; edText.scrollLeft = 0;
+    cm.setMode(fname.startsWith(".env") ? "env" : "yaml");
+    cm.setError(0);
+    cm.refresh();
+    $("#ed-file").value = fname;
+    $("#ed-path").textContent = r.path;
+  } catch (e) {
+    edOutput(`Betöltési hiba: ${e.message}`, "err");
+  } finally {
+    ed.busy = false; edUpdate();
+  }
+}
+
+async function edSave(thenUp = false, force = false) {
+  if (!ed.file || ed.busy) return;
+  const content = edText.value;
+  ed.busy = true; edUpdate();
+  let saved = !edDirty() && !force;
+  try {
+    if (!saved) {
+      const r = await api(`api/files/${encodeURIComponent(ed.file)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, hash: ed.hash, force }),
+      });
+      ed.orig = content; ed.hash = r.hash; saved = true; ed.backup = null;
+      if (!$("#ed-backups").classList.contains("hidden")) edBackups();
+      toast(`${ed.file} mentve`);
+      edOutput(r.output ? `Mentve, de a docker compose config hibát jelez:\n${r.output}` : "", r.output ? "err" : "",
+        r.output ? "✗ Mentve – hibás konfiguráció" : "");
+    }
+  } catch (e) {
+    if (e.status === 422 && e.body?.invalid) {
+      edOutput(e.body.output, "err", "✗ docker compose config hiba – nincs mentve");
+      ed.busy = false; edUpdate();
+      if (confirm("A docker compose config hibát jelzett (lásd lent). Mentés mégis?")) return edSave(thenUp, true);
+      return;
+    }
+    edOutput(e.status === 409 ? `${e.message}\n(Válaszd ki újra a fájlt a listából a friss tartalomhoz – a módosításaid elvesznek.)` : `Mentési hiba: ${e.message}`, "err");
+  } finally {
+    ed.busy = false; edUpdate();
+  }
+  if (saved && thenUp) await edUp();
+}
+
+async function edUp() {
+  const name = ed.name;
+  ed.busy = true; edUpdate();
+  state.busy[name] = "up"; render();
+  edOutput(`docker compose up -d – ${name}…`, "", "⏳ up -d");
+  try {
+    const r = await api(`api/projects/${encodeURIComponent(name)}/up`, { method: "POST" });
+    edOutput(r.output.trim() || "up -d kész", "ok", "✓ up -d kész");
+    toast(`${name}: up -d kész`);
+  } catch (e) {
+    edOutput(e.body?.output || e.message, "err", "✗ up -d hiba");
+    toast(`${name}: hiba`, true);
+  } finally {
+    delete state.busy[name];
+    ed.busy = false; edUpdate();
+    loadProjects();
+  }
+}
+
+function closeEditor(fromPopstate = false) {
+  if (!fromPopstate && edDirty() && !confirm("Mentetlen módosítások – kilépsz mentés nélkül?")) return;
+  ed.file = null;
+  $("#editor").classList.add("hidden");
+  $("#editor").setAttribute("aria-hidden", "true");
+  document.body.style.overflow = "";
+  if (!fromPopstate && history.state?.editor) history.back();
+}
+
+// ---- korábbi változatok: betöltés a szerkesztőbe, visszaállítás = Mentés
+const fmtTime = (t) => new Date(t * 1000).toLocaleString("hu-HU", {
+  year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+});
+function fmtAgo(t) {
+  const s = Date.now() / 1000 - t;
+  if (s < 60) return "most";
+  if (s < 3600) return `${Math.floor(s / 60)} perce`;
+  if (s < 86400) return `${Math.floor(s / 3600)} órája`;
+  return `${Math.floor(s / 86400)} napja`;
+}
+
+async function edBackups() {
+  if (!ed.file) return;
+  const list = $("#ed-backups-list");
+  $("#ed-backups").classList.remove("hidden");
+  list.innerHTML = `<p class="muted">Betöltés…</p>`;
+  try {
+    const r = await api(`api/files/${encodeURIComponent(ed.file)}/backups`);
+    $("#ed-backups-info").textContent = `${ed.file} · az utolsó ${r.keep} mentés előtti állapot`;
+    list.innerHTML = `<button class="bk current ${ed.backup ? "" : "active"}" data-bk="">
+        <strong>Jelenlegi (lemezen)</strong><span class="muted">${fmtBytes(new Blob([ed.orig]).size)}</span></button>` +
+      (r.backups.length ? r.backups.map((b) => `<button class="bk ${ed.backup === b.id ? "active" : ""}" data-bk="${esc(b.id)}"
+        title="Ez volt a fájl tartalma a(z) ${esc(fmtTime(b.time))}-kor történt mentés előtt">
+        <strong>${esc(fmtTime(b.time))}</strong><span class="muted">${esc(fmtAgo(b.time))} · ${fmtBytes(b.size)}</span></button>`).join("")
+        : `<p class="muted">Még nincs mentés – minden mentés előtt automatikusan készül egy.</p>`);
+  } catch (e) {
+    list.innerHTML = `<p class="muted">Hiba: ${esc(e.message)}</p>`;
+  }
+}
+
+async function edLoadBackup(id) {
+  if (!id) {  // vissza a lemezen lévő tartalomhoz
+    if (edDirty() && !confirm("Eldobod a szerkesztő mostani tartalmát?")) return;
+    ed.backup = null;
+    edText.value = ed.orig;
+    cm.refresh(); edUpdate(); edOutput("");
+    edBackups();
+    return;
+  }
+  if (edDirty() && !ed.backup && !confirm("Mentetlen módosítások – eldobod és betöltöd a korábbi változatot?")) return;
+  try {
+    const r = await api(`api/files/${encodeURIComponent(ed.file)}/backups/${encodeURIComponent(id)}`);
+    ed.backup = id;
+    edText.value = r.content;
+    edText.scrollTop = 0;
+    cm.setError(0); cm.refresh(); edUpdate();
+    edOutput(`A(z) ${fmtTime(r.time)} előtti változat betöltve a szerkesztőbe – a fájl még NEM változott.\n` +
+      "Visszaállítás: Mentés (a mostani tartalomról is készül mentés). Elvetés: válaszd a „Jelenlegi” sort.",
+      "", `🕘 Korábbi változat: ${fmtTime(r.time)}`);
+    edBackups();
+  } catch (e) {
+    edOutput(e.message, "err", "✗ Nem sikerült betölteni a mentést");
+  }
+}
+
+async function edCheck() {
+  if (!ed.file || ed.busy) return;
+  ed.busy = true; edUpdate();
+  try {
+    const r = await api(`api/files/${encodeURIComponent(ed.file)}/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: edText.value }),
+    });
+    if (!r.checked) edOutput("Ezt a fájlt egyik projekt sem használja -f / --env-file kapcsolóval, ezért nincs mit ellenőrizni.", "", "Ellenőrzés");
+    else if (r.ok) edOutput("docker compose config: rendben", "ok", "✓ Érvényes");
+    else edOutput(r.output, "err", "✗ docker compose config hiba");
+  } catch (e) {
+    edOutput(e.message, "err", "✗ Ellenőrzési hiba");
+  } finally {
+    ed.busy = false; edUpdate();
+  }
+}
+
+edText.addEventListener("input", edUpdate);
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && !$("#editor").classList.contains("hidden")) {
+    e.preventDefault();
+    edSave();
+  }
+});
+$("#ed-close").addEventListener("click", () => closeEditor());
+$("#ed-file").addEventListener("change", (e) => edLoad(e.target.value));
+$("#ed-save").addEventListener("click", () => edSave());
+$("#ed-save-up").addEventListener("click", () => edSave(true));
+$("#ed-check").addEventListener("click", edCheck);
+$("#ed-history").addEventListener("click", () => {
+  if ($("#ed-backups").classList.contains("hidden")) edBackups();
+  else $("#ed-backups").classList.add("hidden");
+});
+$("#ed-backups-close").addEventListener("click", () => $("#ed-backups").classList.add("hidden"));
+$("#ed-backups-list").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-bk]");
+  if (b) edLoadBackup(b.dataset.bk);
+});
+$("#ed-wrap").addEventListener("change", (e) => cm.setWrap(e.target.checked));
+$("#ed-output").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-out]");
+  const o = $("#ed-output");
+  if (b?.dataset.out === "close") edOutput("");
+  else if (b?.dataset.out === "toggle" || e.target.closest(".outbox-head")) {
+    o.classList.toggle("collapsed");
+    o.querySelector("[data-out=toggle]").textContent = o.classList.contains("collapsed") ? "▸" : "▾";
+  } else if (o.dataset.line) cm.gotoLine(+o.dataset.line);  // hibasorra ugrás
+});
+window.addEventListener("beforeunload", (e) => { if (edDirty()) e.preventDefault(); });
+
 // ------------------------------------------------------------------ események
 $("#projects").addEventListener("click", (e) => {
   const el = e.target.closest("[data-act]");
   if (!el) return;
-  const { act, name, svc } = el.dataset;
+  if (el.disabled) return;
+  const { act, name, svc, file } = el.dataset;
   if (act === "toggle") toggle(name);
+  else if (act === "edit") openEditor(name, file);
   else if (act === "logs") openLogs(name, svc || "");
   else if (act === "clear-output") { delete state.output[name]; render(); }
+  else if (act === "out-toggle") {
+    if (state.output[name]) state.output[name].collapsed = !state.output[name].collapsed;
+    render();
+  }
   else doAction(name, act);
 });
 
@@ -420,15 +699,20 @@ $("#log-follow").addEventListener("change", startLogStream);
 $("#log-wrap").addEventListener("change", (e) => $("#log-output").classList.toggle("wrap", e.target.checked));
 $("#log-output").classList.toggle("wrap", $("#log-wrap").checked);
 $("#log-bottom").addEventListener("click", () => { const o = $("#log-output"); o.scrollTop = o.scrollHeight; });
-// Android "vissza" gomb a log nézetet zárja be
+// Android "vissza" gomb a log nézetet / szerkesztőt zárja be
 window.addEventListener("popstate", () => {
   if (!$("#logview").classList.contains("hidden")) closeLogs(true);
+  else if (!$("#editor").classList.contains("hidden")) {
+    if (edDirty() && !confirm("Mentetlen módosítások – kilépsz mentés nélkül?")) {
+      history.pushState({ editor: ed.name }, "");
+    } else closeEditor(true);
+  }
 });
 
 // automatikus frissítés, csak ha látható az oldal
 setInterval(() => {
   if (document.visibilityState === "visible" && $("#logview").classList.contains("hidden")
-      && !Object.keys(state.busy).length) loadProjects();
+      && $("#editor").classList.contains("hidden") && !Object.keys(state.busy).length) loadProjects();
 }, REFRESH_MS);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") loadProjects();

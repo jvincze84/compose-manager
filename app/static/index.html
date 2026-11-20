@@ -57,8 +57,54 @@
     </footer>
   </section>
 
+  <!-- Szerkesztő (docker-compose-*.yaml / .env-*) -->
+  <section id="editor" class="logview editor hidden" aria-hidden="true">
+    <header class="logbar">
+      <button id="ed-close" class="icon-btn" aria-label="Bezárás">←</button>
+      <div class="logtitle">
+        <strong id="ed-project"></strong>
+        <select id="ed-file" title="Fájl"></select>
+      </div>
+      <button id="ed-history" class="icon-btn" title="Korábbi változatok (backup)" aria-label="Korábbi változatok">🕘</button>
+      <button id="ed-save" class="small-btn save-btn" disabled>Mentés</button>
+    </header>
+    <div id="ed-backups" class="backups hidden">
+      <div class="backups-head">
+        <strong>Korábbi változatok</strong>
+        <span id="ed-backups-info" class="muted"></span>
+        <button class="outbox-btn" id="ed-backups-close" aria-label="Bezárás">✕</button>
+      </div>
+      <div id="ed-backups-list" class="backups-list"></div>
+    </div>
+    <div id="ed-code" class="code">
+      <div class="code-gutter-wrap" aria-hidden="true"><div class="code-gutter"></div></div>
+      <div class="code-body">
+        <pre class="code-hl" aria-hidden="true"></pre>
+        <textarea id="ed-text" class="code-input" spellcheck="false" autocapitalize="off"
+          autocomplete="off" autocorrect="off"></textarea>
+      </div>
+    </div>
+    <div id="ed-output" class="outbox ed-output hidden">
+      <div class="outbox-head">
+        <span class="outbox-title"></span>
+        <button class="outbox-btn" data-out="toggle" title="Összecsuk / kinyit" aria-label="Összecsuk">▾</button>
+        <button class="outbox-btn" data-out="close" title="Bezárás" aria-label="Bezárás">✕</button>
+      </div>
+      <pre class="outbox-body"></pre>
+    </div>
+    <footer class="logfoot">
+      <span id="ed-state" class="muted"></span>
+      <span id="ed-pos" class="muted ed-pos"></span>
+      <label><input type="checkbox" id="ed-wrap"> Tördelés</label>
+      <span id="ed-path" class="muted ed-path"></span>
+      <button id="ed-check" class="small-btn" title="docker compose config -q (mentés nélkül)">✓ Ellenőrzés</button>
+      <button id="ed-save-up" class="small-btn">Mentés + Up</button>
+    </footer>
+  </section>
+
   <div id="toast" class="toast hidden"></div>
 
+  <script src="editor.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

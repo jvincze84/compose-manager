@@ -1,6 +1,6 @@
 // Egyszerű service worker: az app shell-t cache-eli, az API-t soha.
-const CACHE = "compose-manager-v6";
-const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest",
+const CACHE = "compose-manager-v9";
+const SHELL = ["./", "index.html", "style.css", "app.js", "editor.js", "manifest.webmanifest",
   "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {

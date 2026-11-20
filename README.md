@@ -14,6 +14,10 @@ Docker socket.
   really up — healthchecks must report `healthy`, containers without a
   healthcheck must have been running for a few seconds
 - **Start / Stop / Restart** per project (with confirmation for stop/restart)
+- **Compose file directory** (`COMPOSE_DIR`, default `/docker-compose`):
+  `docker-compose-*.yaml` files there get **Up / Down** buttons and an
+  in-browser **editor** for the YAML and the related `.env-*` files —
+  projects appear even when they have no containers (after `down`)
 - **Project summary:** running/total containers, CPU, memory (incl. % of host),
   network and disk I/O, PIDs, published ports, compose file path
 - **Per-service details:** state, health, image, ports, CPU and memory bars
@@ -51,6 +55,8 @@ All settings are environment variables (put them in `.env`, which
 | `START_GRACE_SEC` | `5` | A container without a healthcheck counts as "started" after running this long |
 | `STATS_CACHE_SEC` | `4` | How long `docker stats` results are cached |
 | `CMD_TIMEOUT` | `300` | Timeout (s) for start/stop/restart commands |
+| `BACKUP_KEEP` | `10` | Previous versions kept per edited file (see *Backups*) |
+| `COMPOSE_DIR` | `/docker-compose` | Directory of `docker-compose-*.yaml` / `run-*.cmd` / `.env-*` files (see below) |
 
 ### Mounting compose files
 
@@ -68,6 +74,43 @@ If your compose projects live elsewhere, add those directories to `volumes`
 `.env` files next to the compose file keep working because the paths are
 identical. Variables exported only in your host shell are **not** visible
 to the container.
+
+### Compose file directory (`COMPOSE_DIR`)
+
+Mount it **read-write at the same path** as on the host (relative bind mounts
+such as `./data/...` are resolved by the Docker daemon on the host).
+
+| File | Meaning |
+|---|---|
+| `docker-compose-<key>.yaml` / `.yml` | one project ("stack") each |
+| `run-<key>.cmd` / `.sh` *(optional)* | the command you used to run it, e.g. `docker-compose -p immich-app -f /docker-compose/docker-compose-immich.yaml --project-directory /docker-compose --env-file=/docker-compose/.env-immich up -d`. It is **never executed** — only `-p`, `-f`, `--project-directory`, `--env-file` and `--profile` are read from it (matched to the YAML through `-f`). |
+| `.env-<key>`, `.env-<key>-*` | editable env files of the stack |
+
+Without a `run-*.cmd`: project name = the YAML's top-level `name:` or `<key>`,
+project directory = `COMPOSE_DIR`, `--env-file .env-<key>` if it exists.
+
+For these projects:
+
+- **Up** = `docker compose <args> up -d --remove-orphans`,
+  **Down** = `… down --remove-orphans` (volumes are kept),
+  **Start** = plain `compose start` (use Up to apply file changes).
+- **Editor**: built-in, dependency-free code editor with YAML / `.env` syntax
+  highlighting, line numbers, auto-indent (after `key:`, list continuation),
+  Tab / Shift+Tab block indent, Ctrl+/ comment toggle, Ctrl+S save, TAB
+  characters flagged (invalid in YAML). **✓ Check** validates without saving;
+  YAML errors mark and jump to the offending line.
+- **Edit**: saving runs `docker compose <args> config -q` against the new
+  content first and asks before saving an invalid file; a concurrent change
+  on disk is detected (HTTP 409). Files are rewritten in place, so owner and
+  permissions are preserved.
+- **Backups**: before every save the current file is copied to
+  `COMPOSE_DIR/.compose-manager-backup/<file>.<YYYYmmdd-HHMMSS-µs>` (directory is
+  root-only, `0700`, since `.env` files hold secrets); the last `BACKUP_KEEP`
+  (default 10) are kept per file. In the editor, **🕘** lists them; picking one
+  loads it into the editor *without* touching the file — **Save** restores it
+  (and backs up the current version first), "Current" discards it.
+- Only `docker-compose-*.yaml` and `.env*` files directly inside
+  `COMPOSE_DIR` can be read or written through the API.
 
 ## How it works
 
@@ -96,7 +139,12 @@ to the container.
 |---|---|
 | `GET /api/projects` | Projects with state |
 | `GET /api/projects/{name}/services` | Containers of a project (`compose ps -a`) |
-| `POST /api/projects/{name}/{start\|stop\|restart}` | Run an action, returns command output |
+| `POST /api/projects/{name}/{start\|stop\|restart\|up\|down}` | Run an action, returns command output (`up`/`down` only for `COMPOSE_DIR` stacks) |
+| `GET /api/files/{file}` | Read an editable file (`content`, `hash`) |
+| `GET /api/files/{file}/backups` | Backups of a file, newest first (`id`, `time`, `size`) |
+| `GET /api/files/{file}/backups/{id}` | Content of one backup |
+| `POST /api/files/{file}/validate` | `compose config -q` on `{content}` without saving |
+| `PUT /api/files/{file}` | Save `{content, hash, force}`; 422 if `compose config` fails, 409 on conflict |
 | `GET /api/projects/{name}/logs?tail=200&follow=true&service=` | Log stream (SSE) |
 | `GET /api/stats` | CPU / memory / IO per project and container |
 

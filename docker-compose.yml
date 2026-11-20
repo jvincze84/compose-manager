@@ -13,6 +13,7 @@ services:
       SELF_PROJECT: compose-manager   # ezt a projektet nem engedi leállítani
       APP_NAME: ${APP_NAME:-Compose Manager}   # PWA / böngésző címsor neve
       APP_SHORT_NAME: ${APP_SHORT_NAME:-}      # ikon alatti rövid név (üres = APP_NAME)
+      COMPOSE_DIR: ${COMPOSE_DIR:-/docker-compose}   # docker-compose-*.yaml, run-*.cmd, .env-*
       # AUTH_USER / AUTH_PASSWORD -> .env fájlban (ajánlott!)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -20,3 +21,6 @@ services:
       # különben a "Start" csak `docker compose start`-ot tud (up -d helyett).
       - /opt:/opt:ro
       - /home:/home:ro
+      # docker-compose-*.yaml / .env-* fájlok: up/down + szerkesztés -> ÍRHATÓ,
+      # és ugyanazon az útvonalon (a relatív ./data/... bind mountok miatt)
+      - ${COMPOSE_DIR:-/docker-compose}:${COMPOSE_DIR:-/docker-compose}
