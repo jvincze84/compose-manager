@@ -1,0 +1,22 @@
+services:
+  compose-manager:
+    build: .
+    image: compose-manager:latest
+    container_name: compose-manager
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8095}:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SELF_PROJECT: compose-manager   # ezt a projektet nem engedi leállítani
+      APP_NAME: ${APP_NAME:-Compose Manager}   # PWA / böngésző címsor neve
+      APP_SHORT_NAME: ${APP_SHORT_NAME:-}      # ikon alatti rövid név (üres = APP_NAME)
+      # AUTH_USER / AUTH_PASSWORD -> .env fájlban (ajánlott!)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # A compose fájlokat UGYANAZON az útvonalon kell látnia, mint a hoston,
+      # különben a "Start" csak `docker compose start`-ot tud (up -d helyett).
+      - /opt:/opt:ro
+      - /home:/home:ro

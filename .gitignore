@@ -1,0 +1,29 @@
+# Secrets / local config
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+compose.override.yml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node (if tooling is ever added)
+node_modules/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Claude Code local (per-user) settings
+.claude/settings.local.json

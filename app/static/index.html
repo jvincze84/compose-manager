@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="{{APP_SHORT_NAME}}">
+  <title>{{APP_NAME}}</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>{{APP_NAME}}</h1>
+    <div class="topbar-actions">
+      <span id="updated" class="muted"></span>
+      <button id="refresh" class="icon-btn" title="Frissítés" aria-label="Frissítés">⟳</button>
+    </div>
+  </header>
+
+  <div class="filter">
+    <input id="search" type="search" placeholder="Keresés…" autocomplete="off">
+    <div id="chips" class="chips" role="tablist"></div>
+    <div class="list-tools">
+      <button id="expand-all" class="small-btn" disabled>▾ Mind kinyit</button>
+      <button id="collapse-all" class="small-btn" disabled>▴ Mind becsuk</button>
+    </div>
+  </div>
+
+  <main id="projects" class="projects">
+    <p class="muted center">Betöltés…</p>
+  </main>
+
+  <!-- Log nézet -->
+  <section id="logview" class="logview hidden" aria-hidden="true">
+    <header class="logbar">
+      <button id="log-close" class="icon-btn" aria-label="Bezárás">←</button>
+      <div class="logtitle">
+        <strong id="log-project"></strong>
+        <select id="log-service"><option value="">összes service</option></select>
+      </div>
+      <select id="log-tail" title="Sorok száma">
+        <option>100</option><option selected>200</option><option>500</option><option>2000</option>
+      </select>
+    </header>
+    <pre id="log-output" class="logoutput"></pre>
+    <footer class="logfoot">
+      <label><input type="checkbox" id="log-follow" checked> Követés</label>
+      <label><input type="checkbox" id="log-wrap" checked> Tördelés</label>
+      <span id="log-state" class="muted"></span>
+      <button id="log-bottom" class="small-btn">↓ Alja</button>
+    </footer>
+  </section>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
