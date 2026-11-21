@@ -38,6 +38,15 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
     via its `-f`. `stack_args()` builds the compose args. Stacks are merged into
     `/api/projects` by project name (`stack` field); stacks without containers get
     state `absent`. `up`/`down` only for stacks; Start on a stack = plain `start`.
+  - Pull (stacks only, not `SELF_PROJECT`): `pull_job()` runs pull → down → up as an
+    `asyncio` task (`_pull_jobs`, one per project, 409 otherwise) feeding a queue;
+    `POST /api/projects/{name}/pull` streams it as NDJSON (+ `{"ping"}` every 15 s).
+    The task survives client disconnect on purpose. Pull failure → stop, nothing is
+    taken down; down failure → up is still attempted. `PULL_TIMEOUT` (1800 s) for
+    the pull step. The generic `/{action}` route is registered first, so it
+    forwards `pull` to `api_pull`. Frontend: `doPull()` reads the stream with
+    `fetch` + reader into `state.output[name]` (`running` flag keeps the outbox
+    scrolled to the bottom across re-renders).
   - File editor: `/api/files/{fname}` GET/PUT, only `COMPOSE_FILE_RE` / `ENV_FILE_RE`
     names directly in `COMPOSE_DIR` (no `/`). PUT: sha256 conflict check (409),
     `docker compose config -q` with a temp copy substituted (422 unless `force`),
@@ -132,6 +141,8 @@ unless asked — tell them the command instead.
 
 - `stop` instead of `down`: projects are discovered from container labels; after
   `down` they would vanish from the list.
+- Pull order is pull → down → up (user asked for down → pull → up; changed for
+  shorter downtime and safety on pull failure — explained to the user).
 - Start uses `up -d` (applies compose file changes) for projects outside
   `COMPOSE_DIR`; for `COMPOSE_DIR` stacks there is a separate Up button, so Start is
   plain `compose start` there.
@@ -143,6 +154,6 @@ unless asked — tell them the command instead.
 
 ## Ideas / possible next steps
 
-Mentioned to the user, not requested yet: pull & recreate, creating a new stack /
+Mentioned to the user, not requested yet: creating a new stack /
 new `.env-*` file from the UI, Up/Down/edit for projects outside `COMPOSE_DIR`
 (e.g. `/docker-iac`), search/replace in the editor.

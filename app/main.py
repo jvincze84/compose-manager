@@ -27,6 +27,8 @@ APP_NAME = os.environ.get("APP_NAME", "").strip() or "Compose Manager"
 APP_SHORT_NAME = os.environ.get("APP_SHORT_NAME", "").strip() or (
     "Compose" if APP_NAME == "Compose Manager" else APP_NAME)
 CMD_TIMEOUT = int(os.environ.get("CMD_TIMEOUT", "300"))
+# `docker compose pull` időkorlátja (nagy image-ek lassú vonalon)
+PULL_TIMEOUT = int(os.environ.get("PULL_TIMEOUT", "1800"))
 STATS_CACHE_SEC = float(os.environ.get("STATS_CACHE_SEC", "4"))
 # healthcheck nélküli konténer ennyi másodperc futás után számít "rendesen elindultnak"
 START_GRACE_SEC = float(os.environ.get("START_GRACE_SEC", "5"))
@@ -429,6 +431,8 @@ async def api_services(name: str):
 
 @app.post("/api/projects/{name}/{action}")
 async def api_action(name: str, action: str):
+    if action == "pull":  # ez az útvonal előbb illeszkedik, mint a lenti /pull
+        return await api_pull(name)
     if action not in ("start", "stop", "restart", "up", "down"):
         raise HTTPException(400, "Ismeretlen művelet")
     project = await get_project(name)
@@ -468,6 +472,94 @@ async def api_action(name: str, action: str):
         {"ok": code == 0, "command": cmd, "output": out},
         status_code=200 if code == 0 else 500,
     )
+
+
+# ------------------------------------------------------------- pull (+ down + up)
+_pull_jobs: dict[str, asyncio.Task] = {}  # projekt -> futó pull feladat
+
+
+async def run_stream(args: list[str], emit, timeout: int) -> int:
+    """Parancs futtatása, a kimenet soronként az emit()-be."""
+    proc = await asyncio.create_subprocess_exec(
+        *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+    )
+
+    async def pump() -> int:
+        async for raw in proc.stdout:
+            for part in raw.decode(errors="replace").replace("\r", "\n").split("\n"):
+                if part.strip():
+                    emit(part.rstrip())
+        return await proc.wait()
+
+    try:
+        return await asyncio.wait_for(pump(), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        emit(f"Időtúllépés ({timeout}s)")
+        return 124
+
+
+async def pull_job(stack: dict, q: asyncio.Queue) -> None:
+    """pull -> down -> up. Ha a pull nem sikerül, nem állítunk le semmit;
+    ha a down hibázik, az up-ot akkor is megpróbáljuk (hogy fusson a projekt)."""
+    base = stack_args(stack)
+    steps = [
+        ("pull", base + ["pull"], PULL_TIMEOUT),
+        ("down", base + ["down", "--remove-orphans"], CMD_TIMEOUT),
+        ("up -d", base + ["up", "-d", "--remove-orphans"], CMD_TIMEOUT),
+    ]
+    ok = True
+    try:
+        for label, args, timeout in steps:
+            q.put_nowait({"step": label})
+            code = await run_stream(args, lambda line: q.put_nowait({"line": line}), timeout)
+            if code != 0:
+                ok = False
+                q.put_nowait({"line": f"✗ {label} sikertelen (kilépési kód: {code})"})
+                if label == "pull":
+                    q.put_nowait({"line": "A projekt nem lett leállítva."})
+                    break
+    except Exception as e:  # pragma: no cover - váratlan hiba
+        ok = False
+        q.put_nowait({"line": f"Hiba: {e}"})
+    q.put_nowait({"done": True, "ok": ok})
+
+
+@app.post("/api/projects/{name}/pull")
+async def api_pull(name: str):
+    """Új image-ek letöltése, majd down + up. A kimenet NDJSON stream:
+    {"step": ..} / {"line": ..} / {"done": true, "ok": bool}. A feladat a kliens
+    lecsatlakozása után is végigfut (különben leállítva maradhatna a projekt)."""
+    await get_project(name)
+    if name == SELF_PROJECT:
+        raise HTTPException(400, "A Compose Managert nem lehet önmagából újraindítani (down)")
+    stack = find_stack(name)
+    if not stack:
+        raise HTTPException(400, f"Nincs {COMPOSE_DIR}/docker-compose-*.yaml ehhez a projekthez")
+    if not files_available(stack["files"]):
+        raise HTTPException(400, "A compose fájl nem olvasható a konténerből")
+    if name in _pull_jobs:
+        raise HTTPException(409, "Már fut egy pull ennél a projektnél")
+
+    q: asyncio.Queue = asyncio.Queue()
+    task = asyncio.create_task(pull_job(stack, q))
+    _pull_jobs[name] = task
+    task.add_done_callback(lambda _t: _pull_jobs.pop(name, None))
+
+    async def stream():
+        while True:
+            try:
+                item = await asyncio.wait_for(q.get(), 15)
+            except asyncio.TimeoutError:
+                yield json.dumps({"ping": True}) + "\n"  # keep-alive (proxy-k miatt)
+                continue
+            yield json.dumps(item, ensure_ascii=False) + "\n"
+            if item.get("done"):
+                break
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/projects/{name}/logs")

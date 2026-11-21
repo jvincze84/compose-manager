@@ -236,7 +236,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .list-tools .small-btn:disabled { opacity: 0.35; cursor: default; }
 
 /* ---------- compose fájlos projektek: up / down / szerkesztés ---------- */
-.stack-actions { grid-template-columns: repeat(3, 1fr); margin-top: -6px; }
+.stack-actions { grid-template-columns: repeat(4, 1fr); margin-top: -6px; }
+.btn.pull { color: #38bdf8; }
+.outbox.running { border-color: var(--blue); }
+.outbox.running .outbox-title { color: #60a5fa; }
+.outbox.running .outbox-body { max-height: 260px; }
 .btn.up { color: var(--green); }
 .btn.down { color: var(--red); }
 .btn.edit { color: #a78bfa; }

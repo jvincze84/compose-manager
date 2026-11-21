@@ -233,6 +233,14 @@ function render() {
     $("#projects").innerHTML = `<p class="muted center">Nincs találat</p>`;
     return;
   }
+  const scroll = {};  // futó kimenetnél a görgetés megtartása / aljára ugrás
+  document.querySelectorAll(".outbox.running .outbox-body").forEach((el) => {
+    scroll[el.dataset.name] = atBottom(el) ? -1 : el.scrollTop;
+  });
+  requestAnimationFrame(() => document.querySelectorAll(".outbox.running .outbox-body").forEach((el) => {
+    const s = scroll[el.dataset.name];
+    el.scrollTop = s === undefined || s === -1 ? el.scrollHeight : s;
+  }));
   $("#projects").innerHTML = list.map((p) => {
     const busy = state.busy[p.name];
     const open = state.open.has(p.name);
@@ -262,15 +270,16 @@ function render() {
       ${p.stack ? `<div class="actions stack-actions">
         <button class="btn up" data-act="up" data-name="${n}" title="${esc("docker " + p.stack.command + " up -d --remove-orphans")}" ${busy ? "disabled" : ""}>⬆ Up</button>
         <button class="btn down" data-act="down" data-name="${n}" title="${esc("docker " + p.stack.command + " down --remove-orphans")}" ${busy || absent || p.self ? "disabled" : ""}>⬇ Down</button>
-        <button class="btn edit" data-act="edit" data-name="${n}">✎ Szerkesztés</button>
+        <button class="btn pull" data-act="pull" data-name="${n}" title="docker compose pull, majd down + up -d" ${busy || p.self ? "disabled" : ""}>⤓ Pull</button>
+        <button class="btn edit" data-act="edit" data-name="${n}">✎ Szerk.</button>
       </div>` : ""}
-      ${out ? `<div class="outbox ${out.ok ? "ok" : "err"} ${out.collapsed ? "collapsed" : ""}">
+      ${out ? `<div class="outbox ${out.running ? "running" : out.ok ? "ok" : "err"} ${out.collapsed ? "collapsed" : ""}">
         <div class="outbox-head" data-act="out-toggle" data-name="${n}">
-          <span class="outbox-title">${out.ok ? "✓" : "✗"} ${esc(out.title || "kimenet")}</span>
+          <span class="outbox-title">${out.running ? "⏳" : out.ok ? "✓" : "✗"} ${esc(out.title || "kimenet")}</span>
           <button class="outbox-btn" data-act="out-toggle" data-name="${n}" title="Összecsuk / kinyit">${out.collapsed ? "▸" : "▾"}</button>
           <button class="outbox-btn" data-act="clear-output" data-name="${n}" title="Bezárás" aria-label="Bezárás">✕</button>
         </div>
-        <pre class="outbox-body">${esc(out.text)}</pre>
+        <pre class="outbox-body" data-name="${n}">${esc(out.text)}</pre>
       </div>` : ""}
       ${open ? summaryHtml(p) + serviceHtml(p) : ""}
     </article>`;
@@ -281,11 +290,13 @@ function render() {
 const CONFIRM = {
   stop: (n) => `Leállítod a(z) „${n}” projektet?`,
   restart: (n) => `Újraindítod a(z) „${n}” projektet?`,
+  pull: (n) => `Pull: letölti a(z) „${n}” új image-eit, majd down + up -d.\nA szolgáltatás rövid időre leáll (a letöltés alatt még fut).`,
   down: (n) => `docker compose down: leállítod és TÖRLÖD a(z) „${n}” konténereit és hálózatait?\n(A volume-ok és a ./data könyvtár megmaradnak.)`,
 };
 
 async function doAction(name, action) {
   if (CONFIRM[action] && !confirm(CONFIRM[action](name))) return;
+  if (action === "pull") return doPull(name);
   state.busy[name] = action;
   delete state.output[name];
   render();
@@ -298,6 +309,60 @@ async function doAction(name, action) {
     toast(`${name}: hiba`, true);
     state.output[name] = { ok: false, text: e.body?.output || e.message, title: `${action}: hiba` };
   } finally {
+    delete state.busy[name];
+    await loadProjects();
+  }
+}
+
+// pull -> down -> up: NDJSON stream, élő kimenet a kártyán
+async function doPull(name) {
+  state.busy[name] = "pull";
+  const out = state.output[name] = { ok: true, running: true, title: "pull → down → up -d", text: "" };
+  const lines = [];
+  let raf = 0;
+  const push = (l) => {
+    lines.push(l);
+    if (lines.length > 400) lines.splice(0, lines.length - 400);
+    out.text = lines.join("\n");
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(); });
+  };
+  render();
+  let done = null;
+  try {
+    const r = await fetch(`api/projects/${encodeURIComponent(name)}/pull`, { method: "POST" });
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`;
+      try { msg = (await r.json()).detail || msg; } catch { /* nincs json */ }
+      throw new Error(msg);
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done: end } = await reader.read();
+      if (end) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const raw = buf.slice(0, i); buf = buf.slice(i + 1);
+        if (!raw.trim()) continue;
+        const m = JSON.parse(raw);
+        if (m.step) { out.title = `pull → down → up -d · ${m.step}…`; push(`── ${m.step} ──`); }
+        else if (m.line !== undefined) push(m.line);
+        else if (m.done) done = m;
+      }
+    }
+    if (!done) throw new Error("A kapcsolat megszakadt – a művelet a szerveren tovább fut, frissíts később.");
+    out.ok = done.ok;
+    out.title = done.ok ? "pull → down → up -d kész" : "pull → down → up -d: hiba";
+    toast(`${name}: pull ${done.ok ? "kész" : "hiba"}`, !done.ok);
+  } catch (e) {
+    out.ok = false;
+    out.title = "pull: hiba";
+    push(e.message);
+    toast(`${name}: pull hiba`, true);
+  } finally {
+    out.running = false;
     delete state.busy[name];
     await loadProjects();
   }

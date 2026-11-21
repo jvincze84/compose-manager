@@ -1,5 +1,5 @@
 // Egyszerű service worker: az app shell-t cache-eli, az API-t soha.
-const CACHE = "compose-manager-v9";
+const CACHE = "compose-manager-v10";
 const SHELL = ["./", "index.html", "style.css", "app.js", "editor.js", "manifest.webmanifest",
   "icon.svg", "icon-192.png", "icon-512.png"];
 

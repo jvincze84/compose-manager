@@ -15,7 +15,7 @@ Docker socket.
   healthcheck must have been running for a few seconds
 - **Start / Stop / Restart** per project (with confirmation for stop/restart)
 - **Compose file directory** (`COMPOSE_DIR`, default `/docker-compose`):
-  `docker-compose-*.yaml` files there get **Up / Down** buttons and an
+  `docker-compose-*.yaml` files there get **Up / Down / Pull** buttons and an
   in-browser **editor** for the YAML and the related `.env-*` files —
   projects appear even when they have no containers (after `down`)
 - **Project summary:** running/total containers, CPU, memory (incl. % of host),
@@ -54,7 +54,8 @@ All settings are environment variables (put them in `.env`, which
 | `SELF_PROJECT` | `compose-manager` | Compose project of this app; it cannot be stopped from the UI |
 | `START_GRACE_SEC` | `5` | A container without a healthcheck counts as "started" after running this long |
 | `STATS_CACHE_SEC` | `4` | How long `docker stats` results are cached |
-| `CMD_TIMEOUT` | `300` | Timeout (s) for start/stop/restart commands |
+| `CMD_TIMEOUT` | `300` | Timeout (s) for start/stop/restart/up/down commands |
+| `PULL_TIMEOUT` | `1800` | Timeout (s) for the `pull` step of **Pull** |
 | `BACKUP_KEEP` | `10` | Previous versions kept per edited file (see *Backups*) |
 | `COMPOSE_DIR` | `/docker-compose` | Directory of `docker-compose-*.yaml` / `run-*.cmd` / `.env-*` files (see below) |
 
@@ -94,6 +95,12 @@ For these projects:
 - **Up** = `docker compose <args> up -d --remove-orphans`,
   **Down** = `… down --remove-orphans` (volumes are kept),
   **Start** = plain `compose start` (use Up to apply file changes).
+- **Pull** = `pull` → `down --remove-orphans` → `up -d --remove-orphans`, with
+  live output on the card. Images are pulled *before* the project is taken
+  down, so downtime is short and a failed pull (registry down, bad tag) leaves
+  the project running untouched. The job runs server-side: closing the page or
+  losing the connection does not leave the project stopped half-way. Not
+  available for the app's own project.
 - **Editor**: built-in, dependency-free code editor with YAML / `.env` syntax
   highlighting, line numbers, auto-indent (after `key:`, list continuation),
   Tab / Shift+Tab block indent, Ctrl+/ comment toggle, Ctrl+S save, TAB
@@ -140,6 +147,7 @@ For these projects:
 | `GET /api/projects` | Projects with state |
 | `GET /api/projects/{name}/services` | Containers of a project (`compose ps -a`) |
 | `POST /api/projects/{name}/{start\|stop\|restart\|up\|down}` | Run an action, returns command output (`up`/`down` only for `COMPOSE_DIR` stacks) |
+| `POST /api/projects/{name}/pull` | pull → down → up; NDJSON stream of `{"step"}`, `{"line"}`, final `{"done", "ok"}` (409 if already running) |
 | `GET /api/files/{file}` | Read an editable file (`content`, `hash`) |
 | `GET /api/files/{file}/backups` | Backups of a file, newest first (`id`, `time`, `size`) |
 | `GET /api/files/{file}/backups/{id}` | Content of one backup |
