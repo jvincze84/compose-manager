@@ -78,6 +78,9 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
     `data-act` attributes. `loadStats()` runs in parallel with `loadProjects()`.
     Refresh every 10 s; every 2 s while any project is `starting`.
     localStorage keys: `open`, `stateFilter`. Single-column card list.
+    Filter chips = `STATE_FILTERS` (key -> [label, predicate]); single-select. State
+    filters + `withfile` / `nofile` (has / lacks a `COMPOSE_DIR` stack, `p.stack`);
+    `starting` / `problem` are hidden while empty, the file filters while no stacks exist.
     The editor UI lives in `files.js` (loaded after `app.js`, uses its globals).
     Action output (card and editor) = `.outbox`: collapsible (▾) and closable (✕).
   - `files.js`: editor overlay (`#editor`, global `ed` object) = file browser

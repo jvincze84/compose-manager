@@ -195,20 +195,27 @@ function headStatsHtml(p) {
   return `<span class="muted hstats">CPU ${fmtPct(st.cpu)} · RAM ${fmtBytes(st.mem)}</span>`;
 }
 
-// state filters: key -> [label, project states it includes]
+// filters: key -> [label, predicate (null = everything)]
+const inStates = (...states) => (p) => states.includes(p.state);
 const STATE_FILTERS = {
   all: ["All", null],
-  running: ["Running", ["running"]],
-  starting: ["Starting", ["starting"]],
-  problem: ["Problem", ["unhealthy", "partial"]],
-  stopped: ["Stopped", ["stopped", "absent"]],
+  running: ["Running", inStates("running")],
+  starting: ["Starting", inStates("starting")],
+  problem: ["Problem", inStates("unhealthy", "partial")],
+  stopped: ["Stopped", inStates("stopped", "absent")],
+  // projects with / without a docker-compose-*.yaml in COMPOSE_DIR (Up / Down / Pull / Edit)
+  withfile: ["Compose file", (p) => !!p.stack],
+  nofile: ["No compose file", (p) => !p.stack],
 };
+const OPTIONAL_FILTERS = ["starting", "problem"];  // hidden while empty (unless active)
 
 function renderChips(byName) {
-  $("#chips").innerHTML = Object.entries(STATE_FILTERS).map(([key, [label, states]]) => {
-    const count = states ? byName.filter((p) => states.includes(p.state)).length : byName.length;
-    // hide the empty "Starting" / "Problem" filters unless active
-    if (!count && (key === "starting" || key === "problem") && state.stateFilter !== key) return "";
+  const anyStack = state.projects.some((p) => p.stack);
+  $("#chips").innerHTML = Object.entries(STATE_FILTERS).map(([key, [label, pred]]) => {
+    const count = pred ? byName.filter(pred).length : byName.length;
+    if (!count && OPTIONAL_FILTERS.includes(key) && state.stateFilter !== key) return "";
+    // the file filters only make sense when COMPOSE_DIR has stacks
+    if ((key === "withfile" || key === "nofile") && !anyStack && state.stateFilter !== key) return "";
     return `<button class="chip ${key} ${state.stateFilter === key ? "active" : ""}" data-filter="${key}"
       role="tab" aria-selected="${state.stateFilter === key}">${label} <span>${count}</span></button>`;
   }).join("");
@@ -220,8 +227,8 @@ function searchedProjects() {
 }
 
 function visibleProjects() {
-  const allowed = (STATE_FILTERS[state.stateFilter] || STATE_FILTERS.all)[1];
-  return searchedProjects().filter((p) => !allowed || allowed.includes(p.state));
+  const pred = (STATE_FILTERS[state.stateFilter] || STATE_FILTERS.all)[1];
+  return searchedProjects().filter((p) => !pred || pred(p));
 }
 
 function render() {

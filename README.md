@@ -9,7 +9,8 @@ Docker socket.
 ## Features
 
 - **Project list** with live status, based on `docker compose ls -a`
-  (auto-refresh every 10 s, search box, state filter chips)
+  (auto-refresh every 10 s, search box, filter chips: state, and
+  with / without a compose file in `COMPOSE_DIR`)
 - **Accurate status:** a project only turns green once *every* container is
   really up — healthchecks must report `healthy`, containers without a
   healthcheck must have been running for a few seconds

@@ -229,6 +229,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .chip.problem.active { border-color: var(--yellow); }
 .chip.stopped.active { border-color: var(--red); }
 .chip.problem:not(.active) span { color: var(--yellow); }
+/* file filters: separated from the state filters */
+.chip.withfile { margin-left: 10px; position: relative; }
+.chip.withfile::before {
+  content: ""; position: absolute; left: -10px; top: 20%; bottom: 20%;
+  border-left: 1px solid var(--border);
+}
+.chip.withfile.active, .chip.nofile.active { border-color: #a78bfa; }
 
 /* ---------- expand / collapse all ---------- */
 .list-tools { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
