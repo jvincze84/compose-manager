@@ -1,4 +1,4 @@
-# docker CLI + compose plugin a hivatalos image-ből
+# docker CLI + compose plugin from the official image
 FROM docker:cli AS dockercli
 
 FROM python:3.13-slim

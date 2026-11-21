@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="hu">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -19,86 +19,106 @@
     <h1>{{APP_NAME}}</h1>
     <div class="topbar-actions">
       <span id="updated" class="muted"></span>
-      <button id="refresh" class="icon-btn" title="Frissítés" aria-label="Frissítés">⟳</button>
+      <button id="refresh" class="icon-btn" title="Refresh" aria-label="Refresh">⟳</button>
     </div>
   </header>
 
   <div class="filter">
-    <input id="search" type="search" placeholder="Keresés…" autocomplete="off">
+    <input id="search" type="search" placeholder="Search…" autocomplete="off">
     <div id="chips" class="chips" role="tablist"></div>
     <div class="list-tools">
-      <button id="expand-all" class="small-btn" disabled>▾ Mind kinyit</button>
-      <button id="collapse-all" class="small-btn" disabled>▴ Mind becsuk</button>
+      <button id="open-editor" class="small-btn editor-btn" title="Edit files (/docker-compose)">✎ Editor</button>
+      <button id="expand-all" class="small-btn" disabled>▾ Expand all</button>
+      <button id="collapse-all" class="small-btn" disabled>▴ Collapse all</button>
     </div>
   </div>
 
   <main id="projects" class="projects">
-    <p class="muted center">Betöltés…</p>
+    <p class="muted center">Loading…</p>
   </main>
 
-  <!-- Log nézet -->
+  <!-- Log view -->
   <section id="logview" class="logview hidden" aria-hidden="true">
     <header class="logbar">
-      <button id="log-close" class="icon-btn" aria-label="Bezárás">←</button>
+      <button id="log-close" class="icon-btn" aria-label="Close">←</button>
       <div class="logtitle">
         <strong id="log-project"></strong>
-        <select id="log-service"><option value="">összes service</option></select>
+        <select id="log-service"><option value="">all services</option></select>
       </div>
-      <select id="log-tail" title="Sorok száma">
+      <select id="log-tail" title="Number of lines">
         <option>100</option><option selected>200</option><option>500</option><option>2000</option>
       </select>
     </header>
     <pre id="log-output" class="logoutput"></pre>
     <footer class="logfoot">
-      <label><input type="checkbox" id="log-follow" checked> Követés</label>
-      <label><input type="checkbox" id="log-wrap" checked> Tördelés</label>
+      <label><input type="checkbox" id="log-follow" checked> Follow</label>
+      <label><input type="checkbox" id="log-wrap" checked> Wrap</label>
       <span id="log-state" class="muted"></span>
-      <button id="log-bottom" class="small-btn">↓ Alja</button>
+      <button id="log-bottom" class="small-btn">↓ Bottom</button>
     </footer>
   </section>
 
-  <!-- Szerkesztő (docker-compose-*.yaml / .env-*) -->
+  <!-- Editor + file browser (COMPOSE_DIR) -->
   <section id="editor" class="logview editor hidden" aria-hidden="true">
     <header class="logbar">
-      <button id="ed-close" class="icon-btn" aria-label="Bezárás">←</button>
+      <button id="ed-close" class="icon-btn" aria-label="Close">←</button>
+      <button id="ed-tree-btn" class="icon-btn" title="Files" aria-label="Files">📁</button>
       <div class="logtitle">
-        <strong id="ed-project"></strong>
-        <select id="ed-file" title="Fájl"></select>
+        <strong id="ed-title">Editor</strong>
+        <select id="ed-file" class="hidden" title="Project files"></select>
+        <span id="ed-path" class="muted ed-path"></span>
       </div>
-      <button id="ed-history" class="icon-btn" title="Korábbi változatok (backup)" aria-label="Korábbi változatok">🕘</button>
-      <button id="ed-save" class="small-btn save-btn" disabled>Mentés</button>
+      <button id="ed-history" class="icon-btn" title="Previous versions (backups)" aria-label="Previous versions" disabled>🕘</button>
+      <button id="ed-save" class="small-btn save-btn" disabled>Save</button>
     </header>
-    <div id="ed-backups" class="backups hidden">
-      <div class="backups-head">
-        <strong>Korábbi változatok</strong>
-        <span id="ed-backups-info" class="muted"></span>
-        <button class="outbox-btn" id="ed-backups-close" aria-label="Bezárás">✕</button>
+    <div class="ed-main">
+      <aside id="ed-tree" class="tree">
+        <div class="tree-head">
+          <div id="tree-crumbs" class="crumbs"></div>
+          <div class="tree-tools">
+            <input id="tree-filter" type="search" placeholder="Filter…" autocomplete="off">
+            <button id="tree-refresh" class="small-btn" title="Refresh">⟳</button>
+          </div>
+        </div>
+        <div id="tree-list" class="tree-list"></div>
+        <label class="tree-foot muted"><input type="checkbox" id="tree-only-edit"> editable files only</label>
+      </aside>
+      <div class="ed-pane">
+        <div id="ed-backups" class="backups hidden">
+          <div class="backups-head">
+            <strong>Previous versions</strong>
+            <span id="ed-backups-info" class="muted"></span>
+            <button class="outbox-btn" id="ed-backups-close" aria-label="Close">✕</button>
+          </div>
+          <div id="ed-backups-list" class="backups-list"></div>
+        </div>
+        <div id="ed-empty" class="ed-empty muted">Pick a file from the 📁 list.</div>
+        <div id="ed-code" class="code hidden">
+          <div class="code-gutter-wrap" aria-hidden="true"><div class="code-gutter"></div></div>
+          <div class="code-body">
+            <pre class="code-hl" aria-hidden="true"></pre>
+            <textarea id="ed-text" class="code-input" spellcheck="false" autocapitalize="off"
+              autocomplete="off" autocorrect="off"></textarea>
+          </div>
+        </div>
+        <div id="ed-output" class="outbox ed-output hidden">
+          <div class="outbox-head">
+            <span class="outbox-title"></span>
+            <button class="outbox-btn" data-out="toggle" title="Collapse / expand" aria-label="Collapse">▾</button>
+            <button class="outbox-btn" data-out="close" title="Close" aria-label="Close">✕</button>
+          </div>
+          <pre class="outbox-body"></pre>
+        </div>
       </div>
-      <div id="ed-backups-list" class="backups-list"></div>
-    </div>
-    <div id="ed-code" class="code">
-      <div class="code-gutter-wrap" aria-hidden="true"><div class="code-gutter"></div></div>
-      <div class="code-body">
-        <pre class="code-hl" aria-hidden="true"></pre>
-        <textarea id="ed-text" class="code-input" spellcheck="false" autocapitalize="off"
-          autocomplete="off" autocorrect="off"></textarea>
-      </div>
-    </div>
-    <div id="ed-output" class="outbox ed-output hidden">
-      <div class="outbox-head">
-        <span class="outbox-title"></span>
-        <button class="outbox-btn" data-out="toggle" title="Összecsuk / kinyit" aria-label="Összecsuk">▾</button>
-        <button class="outbox-btn" data-out="close" title="Bezárás" aria-label="Bezárás">✕</button>
-      </div>
-      <pre class="outbox-body"></pre>
     </div>
     <footer class="logfoot">
       <span id="ed-state" class="muted"></span>
       <span id="ed-pos" class="muted ed-pos"></span>
-      <label><input type="checkbox" id="ed-wrap"> Tördelés</label>
-      <span id="ed-path" class="muted ed-path"></span>
-      <button id="ed-check" class="small-btn" title="docker compose config -q (mentés nélkül)">✓ Ellenőrzés</button>
-      <button id="ed-save-up" class="small-btn">Mentés + Up</button>
+      <select id="ed-mode" class="ed-mode" title="Syntax"></select>
+      <label><input type="checkbox" id="ed-wrap"> Wrap</label>
+      <span class="spacer"></span>
+      <button id="ed-check" class="small-btn" title="Validate without saving (YAML / JSON / docker compose config)" disabled>✓ Check</button>
+      <button id="ed-save-up" class="small-btn hidden">Save + Up</button>
     </footer>
   </section>
 
@@ -106,5 +126,6 @@
 
   <script src="editor.js"></script>
   <script src="app.js"></script>
+  <script src="files.js"></script>
 </body>
 </html>

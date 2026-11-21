@@ -1,7 +1,7 @@
 {
   "name": "Compose Manager",
   "short_name": "Compose",
-  "description": "Docker compose projektek kezelése",
+  "description": "Manage Docker compose projects",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -13,9 +13,10 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
 ## Language conventions
 
 - **Talk to the user in Hungarian.**
-- UI strings: Hungarian. Code comments: Hungarian (existing style) — either is fine,
-  stay consistent within a file.
-- `README.md`: English. `CLAUDE.md`: English.
+- Everything in the repo is **English**: UI strings, backend error messages, code
+  comments, config file comments, `README.md`, `CLAUDE.md` (switched from Hungarian
+  in 2026-11 at the user's request — don't reintroduce Hungarian text).
+- Dates/times in the UI use the browser locale (`toLocaleString(undefined, …)`).
 
 ## Architecture
 
@@ -47,18 +48,22 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
     forwards `pull` to `api_pull`. Frontend: `doPull()` reads the stream with
     `fetch` + reader into `state.output[name]` (`running` flag keeps the outbox
     scrolled to the bottom across re-renders).
-  - File editor: `/api/files/{fname}` GET/PUT, only `COMPOSE_FILE_RE` / `ENV_FILE_RE`
-    names directly in `COMPOSE_DIR` (no `/`). PUT: sha256 conflict check (409),
-    `docker compose config -q` with a temp copy substituted (422 unless `force`),
-    `POST /api/files/{fname}/validate` = same check without saving (`checked: false`
-    if no stack uses the file via `-f` / `--env-file`),
-    backup to `.compose-manager-backup/`, in-place write (keeps owner/mode).
-  - Backups: `backup_file()` before every PUT → `<fname>.<%Y%m%d-%H%M%S-%f>` (older
-    ones without `-%f` are still recognised, `BACKUP_ID_RE`), pruned to `BACKUP_KEEP`
-    (env, default 10). Timestamps in names are container time (UTC); the UI shows
-    mtime. `GET /api/files/{fname}/backups[/{id}]`. Restore has no endpoint on purpose:
-    the UI loads the backup into the editor and the normal Save writes it (so the
-    current version gets backed up, conflict check + validation still apply).
+  - File editor (`/api/fs/*`, paths relative to `COMPOSE_DIR`): `resolve_rel()` refuses
+    `..`, NUL, symlinks resolving outside the root and the backup dir. Listing shows
+    everything (max `LIST_LIMIT` = 2000 per dir, hides `.cm-tmp-*` and the backup dir);
+    writing only if `is_editable_name()` (`EDIT_EXTENSIONS` + `EDIT_FILENAMES` globs;
+    empty env value = default). Read returns `binary` / `tooLarge` / `encodingError`
+    (→ read-only), `eol` (CRLF is converted to LF for the textarea and back on save),
+    `stacks` (projects using the file). `validate_content()`: stack files/env files →
+    `docker compose config -q` with a temp copy substituted; other YAML → PyYAML;
+    JSON → `json`; returns `line` for the UI. PUT: sha256 conflict check (409),
+    validation (422 unless `force`), no-op if unchanged, backup, in-place write.
+  - Backups: `COMPOSE_DIR/.compose-manager-backup/<rel path>.<id>`; `<file>.original`
+    = content before the first save (or the oldest pre-existing timestamped backup
+    is renamed to it) and is **never pruned**; `<file>.<%Y%m%d-%H%M%S-%f>` before
+    every save, pruned to `BACKUP_KEEP`. Root dir forced to 0700. Restore has no
+    endpoint on purpose: the UI loads the backup and the normal Save writes it.
+    `POST /api/fs/diff` = difflib unified diff backup → editor content.
   - Logs: SSE (`StreamingResponse`), JSON-encoded lines, `event: end` when the process
     exits, `: ping` keep-alive every 15 s; subprocess is killed on client disconnect.
   - Validation: project names `^[a-z0-9][a-z0-9_-]*$`, must exist in `compose ls`;
@@ -73,22 +78,33 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
     `data-act` attributes. `loadStats()` runs in parallel with `loadProjects()`.
     Refresh every 10 s; every 2 s while any project is `starting`.
     localStorage keys: `open`, `stateFilter`. Single-column card list.
-    Editor overlay (`#editor`, `ed` object) reuses the log view layout; back button /
-    `popstate` closes overlays, unsaved changes are confirmed.
+    The editor UI lives in `files.js` (loaded after `app.js`, uses its globals).
     Action output (card and editor) = `.outbox`: collapsible (▾) and closable (✕).
-  - `editor.js`: `CodeEditor.create(root, textarea)` — dependency-free code editor:
-    transparent `<textarea>` over a highlighted `<pre>` + line-number gutter, synced by
-    `transform` on scroll. Line-based YAML / .env highlighters (`highlightYaml`,
-    `highlightEnv`; output must round-trip to the exact source text, or the caret
-    drifts — test by stripping tags in node). YAML helpers: auto-indent after `key:`,
-    list continuation, Tab/Shift+Tab block indent, Ctrl+/ comment, Backspace removes
-    2-space indent, TAB chars marked. Edits go through `execCommand("insertText")` to
-    keep undo. Wrap mode hides the gutter. Font 15px, 16px ≤ 720px (iOS zooms
-    into inputs below 16px). 🕘 button → backup list panel (`#ed-backups`, `ed.backup`). No CDN/library on purpose (offline PWA,
-    no build step).
+  - `files.js`: editor overlay (`#editor`, global `ed` object) = file browser
+    (`#ed-tree`: side panel ≥ 900 px, overlay on phones) + code editor + backups panel
+    (`#ed-backups`) + output (`#ed-output`). `openFileEditor()` (✎ Editor button, reopens
+    last dir/file from localStorage `edDir` / `edFile`; `edOnlyEdit` filter) and
+    `openEditor(project, file)` (card button; stack files in the `#ed-file` quick
+    select). Back button / `popstate` → `editorPopstate()` (closes tree first on
+    phones); unsaved changes are confirmed.
+  - `editor.js`: `CodeEditor` — dependency-free code editor: transparent `<textarea>`
+    over a highlighted `<pre>` + line-number gutter, synced by `transform` on scroll.
+    Modes (`modeFor(filename)`, overridable in the footer): yaml, json, env, haproxy,
+    ini, conf (first word = directive: nginx/Caddyfile/Dockerfile), sh, plain.
+    Highlighter output must round-trip to the exact source text, or the caret drifts
+    — test by stripping tags in node (`CodeEditor.highlight(mode, text)`).
+    `detectIndent()` picks TAB / 2 / 4 spaces. Helpers: YAML auto-indent + list
+    continuation, indent after `{[(` and HAProxy section lines, Tab/Shift+Tab block
+    indent, Ctrl+/ comment (not JSON), Backspace removes one indent unit, TABs
+    flagged in YAML, `setReadOnly()`. Edits go through `execCommand("insertText")` to
+    keep undo. Wrap mode hides the gutter. Font 15px, 16px ≤ 720px (iOS zooms into
+    inputs below 16px). Files > 300 kB are not highlighted. No CDN/library on purpose
+    (offline PWA, no build step).
   - `sw.js`: network-first for the shell, never caches `/api/`.
     **Bump `CACHE` (`compose-manager-vN`) whenever static files change.**
 - `Dockerfile`: `python:3.13-slim` + docker CLI and compose plugin copied from `docker:cli`.
+  Python deps: fastapi (0.165.x), uvicorn, PyYAML (editor validation); `starlette>=1.3.1`
+  is pinned explicitly because older versions have known CVEs (checked with pip-audit).
 - `docker-compose.yml`: mounts docker.sock and `/opt`, `/home` read-only **at the same
   path** (needed for `up -d` with the original compose files). Port `${PORT:-8095}`.
   `${COMPOSE_DIR:-/docker-compose}` is mounted **read-write**, same path.
@@ -155,5 +171,7 @@ unless asked — tell them the command instead.
 ## Ideas / possible next steps
 
 Mentioned to the user, not requested yet: creating a new stack /
-new `.env-*` file from the UI, Up/Down/edit for projects outside `COMPOSE_DIR`
-(e.g. `/docker-iac`), search/replace in the editor.
+new file / rename / delete in the file browser (deliberately not implemented yet:
+only existing files can be changed, and every change is backed up), editor tabs,
+search/replace, `haproxy -c` validation, Up/Down/edit for projects outside
+`COMPOSE_DIR` (e.g. `/docker-iac`).

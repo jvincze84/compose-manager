@@ -52,7 +52,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .filter input {
   width: 100%; padding: 10px 12px; border-radius: 10px;
   background: var(--card); color: var(--text); border: 1px solid var(--border);
-  font-size: 16px; /* iOS ne zoomoljon */
+  font-size: 16px; /* keep iOS from zooming in */
 }
 
 /* ---------- projects ---------- */
@@ -169,7 +169,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .toast.err { border-color: var(--red); }
 
-/* ---------- statisztika ---------- */
+/* ---------- statistics ---------- */
 .lbl { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
 .hstats { display: block; font-variant-numeric: tabular-nums; }
 
@@ -203,13 +203,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cstats .bar { margin: 0; }
 .cstats .val { font-size: 0.8rem; min-width: 4.5em; text-align: right; }
 
-/* ---------- indulás / unhealthy ---------- */
+/* ---------- starting / unhealthy ---------- */
 .dot.starting { background: var(--blue); animation: pulse 1s ease-in-out infinite; }
 .dot.unhealthy { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
 .badge.starting { color: var(--blue); }
 .badge.unhealthy { color: var(--yellow); }
 
-/* ---------- állapot szűrő ---------- */
+/* ---------- state filter ---------- */
 .chips {
   display: flex; gap: 8px; margin-top: 10px; overflow-x: auto;
   scrollbar-width: none; -webkit-overflow-scrolling: touch;
@@ -230,12 +230,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .chip.stopped.active { border-color: var(--red); }
 .chip.problem:not(.active) span { color: var(--yellow); }
 
-/* ---------- mind kinyit / becsuk ---------- */
+/* ---------- expand / collapse all ---------- */
 .list-tools { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .list-tools .small-btn { padding: 8px 12px; }
 .list-tools .small-btn:disabled { opacity: 0.35; cursor: default; }
 
-/* ---------- compose fájlos projektek: up / down / szerkesztés ---------- */
+/* ---------- COMPOSE_DIR stacks: up / down / edit ---------- */
 .stack-actions { grid-template-columns: repeat(4, 1fr); margin-top: -6px; }
 .btn.pull { color: #38bdf8; }
 .outbox.running { border-color: var(--blue); }
@@ -253,7 +253,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: #c4b5fd;
 }
 
-/* ---------- szerkesztő ---------- */
+/* ---------- code editor ---------- */
 .code {
   flex: 1; min-height: 0; display: flex; position: relative; overflow: hidden;
   background: #050811;
@@ -288,14 +288,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .code-input::selection { background: rgba(96, 165, 250, 0.35); }
 .code.wrap .code-hl, .code.wrap .code-input { white-space: pre-wrap; word-break: break-all; }
 .code.wrap .code-hl { min-width: 0; }
-.code.wrap .code-gutter-wrap { display: none; }  /* tördelésnél a sorszámok elcsúsznának */
+.code.wrap .code-gutter-wrap { display: none; }  /* line numbers would drift when wrapping */
 
-/* telefonon 16px: kisebb betűnél az iOS ráközelít fókuszáláskor */
+/* 16px on phones: iOS zooms into inputs with smaller text */
 @media (max-width: 720px) {
   .code { --code-font: 16px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
 }
 
-/* korábbi változatok (backup) */
+/* previous versions (backups) */
 .backups {
   border-bottom: 1px solid var(--border); background: var(--card);
   max-height: 45vh; display: flex; flex-direction: column;
@@ -314,7 +314,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .bk.active { border-color: var(--blue); background: #1e2a4d; }
 #ed-history { width: 36px; height: 36px; font-size: 1rem; }
 
-/* szintaxis színek */
+/* syntax colours */
 .t-key { color: #7dd3fc; }
 .t-punct { color: #94a3b8; }
 .t-dash { color: #f472b6; font-weight: 700; }
@@ -331,7 +331,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .t-err { color: #fca5a5; text-decoration: underline wavy #ef4444; }
 .t-tab { background: rgba(239, 68, 68, 0.35); border-radius: 2px; }
 
-/* ---------- összecsukható / bezárható kimenet ---------- */
+/* ---------- collapsible / closable output ---------- */
 .outbox {
   margin: 0 14px 14px; border-radius: 8px; overflow: hidden;
   background: #050811; border: 1px solid var(--border);
@@ -363,4 +363,75 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .save-btn { color: var(--green); font-weight: 600; padding: 8px 14px; }
 .save-btn:disabled, #ed-save-up:disabled, #ed-check:disabled { opacity: 0.35; cursor: default; }
 #ed-state.dirty { color: var(--yellow); }
-.ed-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.ed-path { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; font-size: 0.75rem; }
+
+/* ---------- Editor: file browser + editor ---------- */
+.editor-btn { color: #a78bfa; margin-right: auto; }
+.logtitle #ed-file {
+  background: var(--card2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 3px 6px; font-size: 14px; max-width: 100%;
+}
+#ed-tree-btn.active { border-color: var(--blue); background: #1e2a4d; }
+#ed-history:disabled { opacity: 0.35; cursor: default; }
+.ed-main { flex: 1; min-height: 0; display: flex; position: relative; }
+.ed-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.ed-empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center; }
+.code.hidden { display: none; }
+.code.readonly .code-hl { opacity: 0.85; }
+.code.readonly .code-input { caret-color: transparent; }
+
+.tree {
+  width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0;
+  background: var(--card); border-right: 1px solid var(--border);
+}
+@media (max-width: 899px) {
+  /* on phones the file list covers the editor */
+  .tree { position: absolute; inset: 0; z-index: 3; width: auto; border-right: 0; }
+}
+.tree-head { padding: 8px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 0.85rem; }
+.crumbs button { background: none; border: 0; padding: 2px 4px; border-radius: 5px; color: #93c5fd; }
+.crumbs button:last-child { color: var(--text); font-weight: 600; }
+.crumbs span { color: var(--muted); }
+.tree-tools { display: flex; gap: 6px; }
+.tree-tools input {
+  flex: 1; min-width: 0; padding: 6px 10px; border-radius: 8px; font-size: 16px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+}
+.tree-list { flex: 1; overflow: auto; padding: 4px; -webkit-overflow-scrolling: touch; }
+.tree-list .pad { padding: 10px; margin: 0; }
+.tr {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 7px 8px; border: 0; border-radius: 7px; background: none; font-size: 0.9rem;
+}
+.tr:hover:not(:disabled) { background: var(--card2); }
+.tr.active { background: #1e2a4d; outline: 1px solid var(--blue); }
+.tr .ic { flex: none; width: 1.3em; text-align: center; }
+.tr .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr .mt { flex: none; color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.tr.file:not(.editable) .nm { color: var(--muted); }
+.tr.editable .nm { color: var(--text); }
+.tr.outside { opacity: 0.4; cursor: not-allowed; }
+.tree-foot { padding: 8px 10px; border-top: 1px solid var(--border); display: flex; gap: 6px; align-items: center; }
+
+.logfoot .spacer { flex: 1; }
+.ed-mode {
+  background: var(--card2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 3px 4px; font-size: 13px;
+}
+
+/* backups: original + diff button */
+.bk-row { display: flex; gap: 4px; align-items: stretch; }
+.bk-row .bk { flex: 1; }
+.bk.original { border-color: var(--yellow); }
+.bk-diff {
+  flex: none; width: 44px; margin-top: 4px; border-radius: 8px;
+  background: var(--card2); border: 1px solid var(--border); font-weight: 700; color: #93c5fd;
+}
+.outbox.diff { border-top-color: var(--blue); }
+.outbox.diff .outbox-body { white-space: pre; word-break: normal; overflow: auto; }
+.d-add { color: #86efac; background: rgba(34, 197, 94, 0.12); display: inline-block; min-width: 100%; }
+.d-del { color: #fca5a5; background: rgba(239, 68, 68, 0.12); display: inline-block; min-width: 100%; }
+.d-hunk { color: #93c5fd; }
+.d-file { color: var(--muted); font-weight: 600; }
+.t-section { color: #f472b6; font-weight: 700; }
