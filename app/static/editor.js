@@ -106,14 +106,16 @@ const CodeEditor = (() => {
   function highlightEnv(text) {
     return text.split("\n").map((line) => {
       if (/^\s*#/.test(line)) return span("comment", line);
-      const m = line.match(/^(\s*)(export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)(\s*=)(.*)$/);
+      // KEY=value, also with an array index: KEY[0]=value (e.g. PROXY_ROUTES[0]="a=b")
+      const m = line.match(/^(\s*)(export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)(\[[^\]\s]*\])?(\s*=)(.*)$/);
       if (!m) return line.trim() ? span("err", line) : escH(line);
-      let val = m[5], comment = "";
+      let val = m[6], comment = "";
       if (!/^\s*["']/.test(val)) {
         const ci = val.search(/\s#/);
         if (ci >= 0) { comment = val.slice(ci); val = val.slice(0, ci); }
       }
-      return escH(m[1]) + span("kw", m[2] || "") + span("key", m[3]) + span("punct", m[4]) +
+      const index = m[4] ? span("punct", "[") + span("num", m[4].slice(1, -1)) + span("punct", "]") : "";
+      return escH(m[1]) + span("kw", m[2] || "") + span("key", m[3]) + index + span("punct", m[5]) +
         withVars("str", val) + span("comment", comment);
     }).join("\n");
   }
