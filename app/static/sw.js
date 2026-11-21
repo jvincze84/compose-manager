@@ -1,6 +1,6 @@
-// Egyszerű service worker: az app shell-t cache-eli, az API-t soha.
-const CACHE = "compose-manager-v6";
-const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest",
+// Simple service worker: caches the app shell, never the API.
+const CACHE = "compose-manager-v14";
+const SHELL = ["./", "index.html", "style.css", "app.js", "editor.js", "files.js", "manifest.webmanifest",
   "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -18,7 +18,7 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.pathname.includes("/api/")) return;
-  // network-first, offline esetén cache
+  // network-first, cache when offline
   e.respondWith(
     fetch(e.request)
       .then((r) => {

@@ -10,13 +10,20 @@ services:
       - path: .env
         required: false
     environment:
-      SELF_PROJECT: compose-manager   # ezt a projektet nem engedi leállítani
-      APP_NAME: ${APP_NAME:-Compose Manager}   # PWA / böngésző címsor neve
-      APP_SHORT_NAME: ${APP_SHORT_NAME:-}      # ikon alatti rövid név (üres = APP_NAME)
-      # AUTH_USER / AUTH_PASSWORD -> .env fájlban (ajánlott!)
+      SELF_PROJECT: compose-manager   # this project cannot be stopped from the UI
+      APP_NAME: ${APP_NAME:-Compose Manager}   # PWA / browser title
+      APP_SHORT_NAME: ${APP_SHORT_NAME:-}      # short name under the icon (empty = APP_NAME)
+      COMPOSE_DIR: ${COMPOSE_DIR:-/docker-compose}   # docker-compose-*.yaml, run-*.cmd, .env-*
+      # Editor: what may be edited (everything can be viewed); empty = default
+      EDIT_EXTENSIONS: ${EDIT_EXTENSIONS:-}
+      EDIT_FILENAMES: ${EDIT_FILENAMES:-}
+      # AUTH_USER / AUTH_PASSWORD -> in the .env file (recommended!)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # A compose fájlokat UGYANAZON az útvonalon kell látnia, mint a hoston,
-      # különben a "Start" csak `docker compose start`-ot tud (up -d helyett).
+      # Compose files must be visible at the SAME path as on the host,
+      # otherwise "Start" can only do `docker compose start` (instead of up -d).
       - /opt:/opt:ro
       - /home:/home:ro
+      # docker-compose-*.yaml / .env-* files: up/down + editing -> WRITABLE,
+      # and at the same path (because of relative ./data/... bind mounts)
+      - ${COMPOSE_DIR:-/docker-compose}:${COMPOSE_DIR:-/docker-compose}
