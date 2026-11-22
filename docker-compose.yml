@@ -5,13 +5,13 @@ services:
     container_name: compose-manager
     restart: unless-stopped
     ports:
-      - "${PORT:-8095}:8080"
+      - "${PORT:-8096}:8080"
     env_file:
       - path: .env
         required: false
     environment:
       SELF_PROJECT: compose-manager   # this project cannot be stopped from the UI
-      APP_NAME: ${APP_NAME:-Compose Manager}   # PWA / browser title
+      APP_NAME: ${APP_NAME:-Compose Manager Frigate}   # PWA / browser title
       APP_SHORT_NAME: ${APP_SHORT_NAME:-}      # short name under the icon (empty = APP_NAME)
       COMPOSE_DIR: ${COMPOSE_DIR:-/docker-compose}   # docker-compose-*.yaml, run-*.cmd, .env-*
       # Editor: what may be edited (everything can be viewed); empty = default

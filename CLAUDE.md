@@ -58,6 +58,10 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
     `docker compose config -q` with a temp copy substituted; other YAML → PyYAML;
     JSON → `json`; returns `line` for the UI. PUT: sha256 conflict check (409),
     validation (422 unless `force`), no-op if unchanged, backup, in-place write.
+    `POST /api/fs/new {dir, name}`: plain name only, whitelisted types only, `O_EXCL`
+    (never overwrites; a symlink with that name is refused), chowned to the parent
+    dir's owner; a top-level `docker-compose-*.yaml` gets `NEW_FILE_TEMPLATES["compose"]`.
+    No rename / delete on purpose (every change must stay restorable from backups).
   - Backups: `COMPOSE_DIR/.compose-manager-backup/<rel path>.<id>`; `<file>.original`
     = content before the first save (or the oldest pre-existing timestamped backup
     is renamed to it) and is **never pruned**; `<file>.<%Y%m%d-%H%M%S-%f>` before
@@ -173,8 +177,8 @@ unless asked — tell them the command instead.
 
 ## Ideas / possible next steps
 
-Mentioned to the user, not requested yet: creating a new stack /
-new file / rename / delete in the file browser (deliberately not implemented yet:
-only existing files can be changed, and every change is backed up), editor tabs,
+Mentioned to the user, not requested yet: rename / delete / new folder in the file
+browser (deliberately not implemented: every change must stay restorable from
+backups — would need a trash / backup of deleted files first), editor tabs,
 search/replace, `haproxy -c` validation, Up/Down/edit for projects outside
 `COMPOSE_DIR` (e.g. `/docker-iac`).

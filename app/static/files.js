@@ -228,6 +228,24 @@ function treeRender() {
   $("#tree-list").innerHTML = html;
 }
 
+// new file in the current directory (only whitelisted types, never overwrites)
+async function newFile() {
+  if (edDirty() && !confirm("Unsaved changes – discard them?")) return;
+  const where = (ed.root || "") + (ed.dir ? "/" + ed.dir : "");
+  const name = (prompt(`New file in ${where}\n\nFile name (e.g. docker-compose-myapp.yaml, .env-myapp, haproxy.cfg):`) || "").trim();
+  if (!name) return;
+  try {
+    const r = await api("api/fs/new", jsonPost({ dir: ed.dir, name }));
+    toast(`${name} created`);
+    await treeLoad(ed.dir);
+    ed.info = null;  // the dirty check was answered above
+    await edOpen(r.path);
+    if (/^docker-compose-.+\.ya?ml$/.test(name) && !ed.dir) loadProjects();  // new stack
+  } catch (e) {
+    alert(`Could not create ${name}:\n${e.message}`);
+  }
+}
+
 // ------------------------------------------------------------------ save / check / up
 const jsonPost = (body, method = "POST") => ({
   method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -411,4 +429,5 @@ $("#tree-only-edit").addEventListener("change", (e) => {
   treeRender();
 });
 $("#tree-refresh").addEventListener("click", () => treeLoad(ed.dir));
+$("#tree-new").addEventListener("click", newFile);
 window.addEventListener("beforeunload", (e) => { if (edDirty()) e.preventDefault(); });

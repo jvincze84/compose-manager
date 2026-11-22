@@ -131,6 +131,11 @@ A full-screen editor with a **file browser** for the whole `COMPOSE_DIR`
   runs the same check and asks before writing an invalid file. A concurrent
   change on disk is detected (HTTP 409).
 - **Save + Up** appears for files used by a stack.
+- **＋ New file** creates an empty file in the current directory. Only
+  whitelisted file types can be created and existing files are never
+  overwritten. A new top-level `docker-compose-<key>.yaml` starts from a small
+  `services:` template and immediately shows up as a project (Up to start it).
+  The new file gets the owner of its directory.
 - Files are rewritten in place, so owner and permissions are preserved.
 
 ### Backups
@@ -181,6 +186,7 @@ between that backup and the editor's current content.
 | `POST /api/projects/{name}/pull` | pull → down → up; NDJSON stream of `{"step"}`, `{"line"}`, final `{"done", "ok"}` (409 if already running) |
 | `GET /api/fs/list?path=` | Directory listing (paths are relative to `COMPOSE_DIR`), `editable` per entry |
 | `GET /api/fs/file?path=` | File content + `hash`, `editable`, `binary`, `eol`, `stacks` using it |
+| `POST /api/fs/new` | Create `{dir, name}` (whitelisted types only; 409 if it exists) |
 | `PUT /api/fs/file` | Save `{path, content, hash, force, eol}`; 422 if validation fails, 409 on conflict, 403 if not whitelisted |
 | `POST /api/fs/validate` | Validate `{path, content}` without saving (`ok`, `checked`, `output`, `line`) |
 | `GET /api/fs/backups?path=` | Backups, newest first, `original` last |
