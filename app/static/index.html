@@ -68,6 +68,7 @@
         <select id="ed-file" class="hidden" title="Project files"></select>
         <span id="ed-path" class="muted ed-path"></span>
       </div>
+      <button id="ed-find-btn" class="icon-btn" title="Find / replace (Ctrl+F, Ctrl+H)" aria-label="Find" disabled>🔍</button>
       <button id="ed-history" class="icon-btn" title="Previous versions (backups)" aria-label="Previous versions" disabled>🕘</button>
       <button id="ed-save" class="small-btn save-btn" disabled>Save</button>
     </header>
@@ -93,10 +94,28 @@
           </div>
           <div id="ed-backups-list" class="backups-list"></div>
         </div>
+        <div id="ed-find" class="findbar hidden">
+          <div class="find-row">
+            <button id="find-rep-toggle" class="find-btn" title="Replace (Ctrl+H)" aria-label="Show replace">▸</button>
+            <input id="find-q" type="text" placeholder="Find" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <span id="find-count" class="find-count muted"></span>
+            <button class="find-btn find-opt" data-find="case" title="Match case" aria-pressed="false">Aa</button>
+            <button class="find-btn find-opt" data-find="regex" title="Regular expression" aria-pressed="false">.*</button>
+            <button class="find-btn" data-find="prev" title="Previous (Shift+Enter, Shift+F3)" aria-label="Previous">↑</button>
+            <button class="find-btn" data-find="next" title="Next (Enter, F3)" aria-label="Next">↓</button>
+            <button class="find-btn" data-find="close" title="Close (Esc)" aria-label="Close">✕</button>
+          </div>
+          <div id="find-rep-row" class="find-row hidden">
+            <input id="find-r" type="text" placeholder="Replace with" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <button class="small-btn" data-find="rep" title="Replace this match (Enter)">Replace</button>
+            <button class="small-btn" data-find="repall" title="Replace all matches">All</button>
+          </div>
+        </div>
         <div id="ed-empty" class="ed-empty muted">Pick a file from the 📁 list.</div>
         <div id="ed-code" class="code hidden">
           <div class="code-gutter-wrap" aria-hidden="true"><div class="code-gutter"></div></div>
           <div class="code-body">
+            <pre class="code-marks" aria-hidden="true"></pre>
             <pre class="code-hl" aria-hidden="true"></pre>
             <textarea id="ed-text" class="code-input" spellcheck="false" autocapitalize="off"
               autocomplete="off" autocorrect="off"></textarea>

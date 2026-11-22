@@ -19,8 +19,8 @@ Docker socket.
   `docker-compose-*.yaml` files there get **Up / Down / Pull** buttons —
   projects appear even when they have no containers (after `down`)
 - **Editor with file browser** for the whole `COMPOSE_DIR`: YAML, JSON,
-  HAProxy, INI/TOML, nginx-style configs, shell, `.env`… with syntax
-  highlighting, validation and **automatic backups of every change** (the
+  HAProxy, INI/TOML, nginx-style configs, shell, BIND, `.env`… with syntax
+  highlighting, search / replace, validation and **automatic backups of every change** (the
   original is always kept)
 - **Project summary:** running/total containers, CPU, memory (incl. % of host),
   network and disk I/O, PIDs, published ports, compose file path
@@ -59,8 +59,8 @@ All settings are environment variables (put them in `.env`, which
 | `CMD_TIMEOUT` | `300` | Timeout (s) for start/stop/restart/up/down commands |
 | `PULL_TIMEOUT` | `1800` | Timeout (s) for the `pull` step of **Pull** |
 | `BACKUP_KEEP` | `10` | Previous versions kept per edited file (see *Backups*) |
-| `EDIT_EXTENSIONS` | `yaml,yml,json,conf,cfg,cnf,ini,toml,env,txt,md,sh,cmd,bat,xml,properties,service,timer,lua,py,js,css,html,j2,tmpl,template` | Extensions the editor may **write** (everything can be viewed) |
-| `EDIT_FILENAMES` | `.env,.env-*,.env.*,Caddyfile,Dockerfile,Makefile,crontab` | Additional editable file names (glob patterns) |
+| `EDIT_EXTENSIONS` | `yaml,yml,json,conf,cfg,cnf,ini,toml,env,txt,md,sh,cmd,bat,xml,properties,service,timer,lua,py,js,css,html,j2,tmpl,template,zone` | Extensions the editor may **write** (everything can be viewed) |
+| `EDIT_FILENAMES` | `.env,.env-*,.env.*,Caddyfile,Dockerfile,Makefile,crontab,named.conf*,db.*` | Additional editable file names (glob patterns) |
 | `COMPOSE_DIR` | `/docker-compose` | Directory of `docker-compose-*.yaml` / `run-*.cmd` / `.env-*` files (see below) |
 
 ### Mounting compose files
@@ -119,12 +119,19 @@ A full-screen editor with a **file browser** for the whole `COMPOSE_DIR`
   outside `COMPOSE_DIR`, `..` and the backup directory are refused.
 - Dependency-free code editor (no CDN, works offline as a PWA): syntax
   highlighting for **YAML, JSON, `.env`, HAProxy, INI/TOML/systemd,
-  nginx/Caddyfile/Dockerfile-style configs and shell**, detected from the file
-  name (can be overridden in the footer); line numbers; auto-indent (YAML
+  nginx/Caddyfile/Dockerfile-style configs, shell, BIND `named.conf*` and DNS
+  zone files** (`db.*`, `*.zone`), detected from the file name (can be
+  overridden in the footer); line numbers; auto-indent (YAML
   `key:` / list continuation, after `{ [ (`, after HAProxy section lines);
   the indent unit (2/4 spaces or TAB) is detected from the file;
-  Tab / Shift+Tab block indent, Ctrl+/ comment toggle, Ctrl+S save; TABs are
-  flagged in YAML. CRLF line endings are preserved.
+  Tab / Shift+Tab block indent, Ctrl+/ comment toggle (`#`, `//` in
+  `named.conf`, `;` in zone files), Ctrl+S save; TABs are flagged in YAML.
+  CRLF line endings are preserved.
+- **Find / replace** (🔍, Ctrl+F, Ctrl+H): matches are highlighted, the
+  counter shows `current/total`; Enter / Shift+Enter or F3 / Shift+F3 step
+  through them; match case (`Aa`) and regular expressions (`.*`, `$1` in the
+  replacement) are optional. Replace / All work only on editable files and
+  can be undone with Ctrl+Z (All is a single undo step).
 - **✓ Check** validates without saving: `docker compose config -q` for files
   used by a stack (`-f` / `--env-file`), YAML parse for other `.yaml/.yml`,
   JSON parse for `.json`. Errors mark and jump to the offending line. Saving

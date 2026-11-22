@@ -46,6 +46,8 @@ function edUpdate() {
   $("#ed-save").disabled = ed.busy || ro || !dirty;
   $("#ed-check").disabled = ed.busy || !ed.path || ro;
   $("#ed-history").disabled = !ed.path;
+  $("#ed-find-btn").disabled = !ed.path;
+  findRepAvailable();
   const stacks = ed.info?.stacks || [];
   $("#ed-save-up").classList.toggle("hidden", !stacks.length || ro);
   $("#ed-save-up").disabled = ed.busy;
@@ -117,6 +119,7 @@ function edEmpty() {
   $("#ed-empty").classList.remove("hidden");
   $("#ed-code").classList.add("hidden");
   $("#ed-path").textContent = "";
+  findClose(false);
   edOutput("");
   edUpdate();
 }
@@ -164,6 +167,7 @@ async function edOpen(path, quiet = false) {
 function closeEditor(fromPopstate = false) {
   if (!fromPopstate && edDirty() && !confirm("Unsaved changes – leave without saving?")) return;
   ed.path = null; ed.info = null;
+  findClose(false);
   $("#editor").classList.add("hidden");
   $("#editor").setAttribute("aria-hidden", "true");
   document.body.style.overflow = "";
@@ -376,12 +380,128 @@ async function edDiff(id) {
   }
 }
 
+// ------------------------------------------------------------------ find / replace
+const fnd = {
+  caseSens: localStorage.getItem("edFindCase") === "1",
+  regex: localStorage.getItem("edFindRegex") === "1",
+};
+const findIsOpen = () => !$("#ed-find").classList.contains("hidden");
+
+function findShow(r) {
+  const q = $("#find-q").value;
+  const c = $("#find-count");
+  c.textContent = !q ? "" : r.error ? "invalid" : !r.count ? "no results"
+    : `${r.index || "–"}/${r.count}${r.capped ? "+" : ""}`;
+  c.classList.toggle("none", !!q && (r.error || !r.count));
+  $("#find-q").classList.toggle("err", !!r.error);
+  const none = !r.count || !!r.error;
+  document.querySelectorAll("#ed-find [data-find=prev],#ed-find [data-find=next],#ed-find [data-find=rep],#ed-find [data-find=repall]").forEach((b) => { b.disabled = none; });
+}
+cm.onSearch = (r) => { if (findIsOpen()) findShow(r); };
+
+function findRun() {
+  findShow(cm.search($("#find-q").value, { caseSens: fnd.caseSens, regex: fnd.regex }));
+}
+
+// the replace row only for editable files
+function findRepAvailable() {
+  const ok = !!ed.info?.editable;
+  $("#find-rep-toggle").disabled = !ok;
+  if (!ok) findRep(false);
+}
+function findRep(on) {
+  $("#find-rep-row").classList.toggle("hidden", !on);
+  $("#find-rep-toggle").textContent = on ? "▾" : "▸";
+}
+
+function findOpen(withReplace = false) {
+  if (!ed.path || $("#ed-code").classList.contains("hidden")) return;
+  $("#ed-find").classList.remove("hidden");
+  $("#ed-find-btn").classList.add("active");
+  if (withReplace && ed.info?.editable) findRep(true);
+  // a single-line selection in the editor becomes the query
+  const sel = edText.value.slice(edText.selectionStart, edText.selectionEnd);
+  if (document.activeElement === edText && sel && !sel.includes("\n")) $("#find-q").value = sel;
+  const input = withReplace && ed.info?.editable && $("#find-q").value ? $("#find-r") : $("#find-q");
+  input.focus();
+  input.select();
+  findRun();
+}
+
+function findClose(focus = true) {
+  if (!findIsOpen()) return;
+  $("#ed-find").classList.add("hidden");
+  $("#ed-find-btn").classList.remove("active");
+  cm.search("");
+  if (focus && ed.path) edText.focus();
+}
+
+function findOpts() {
+  $("[data-find=case]").setAttribute("aria-pressed", fnd.caseSens);
+  $("[data-find=regex]").setAttribute("aria-pressed", fnd.regex);
+}
+findOpts();
+
+function findAct(act) {
+  if (act === "next" || act === "prev") return findShow(cm.findNext(act === "next" ? 1 : -1));
+  if (act === "close") return findClose();
+  if (act === "case" || act === "regex") {
+    if (act === "case") fnd.caseSens = !fnd.caseSens;
+    else fnd.regex = !fnd.regex;
+    localStorage.setItem("edFindCase", fnd.caseSens ? "1" : "0");
+    localStorage.setItem("edFindRegex", fnd.regex ? "1" : "0");
+    findOpts();
+    return findRun();
+  }
+  if (act === "rep") {
+    findShow(cm.replaceCurrent($("#find-r").value));
+    $("#find-r").focus();
+  } else if (act === "repall") {
+    const n = cm.replaceAll($("#find-r").value);
+    toast(`${n} replaced`);
+    $("#find-r").focus();
+  }
+}
+
+$("#ed-find").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-find]");
+  if (b && !b.disabled) findAct(b.dataset.find);
+});
+$("#find-rep-toggle").addEventListener("click", () => {
+  const on = $("#find-rep-row").classList.contains("hidden");
+  findRep(on);
+  if (on) $("#find-r").focus();
+});
+$("#ed-find-btn").addEventListener("click", () => (findIsOpen() ? findClose() : findOpen()));
+$("#find-q").addEventListener("input", findRun);
+$("#find-q").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); findAct(e.shiftKey ? "prev" : "next"); }
+});
+$("#find-r").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); if (!$("[data-find=rep]").disabled) findAct("rep"); }
+});
+$("#ed-find").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); findClose(); }
+});
+
 // ------------------------------------------------------------------ events
 edText.addEventListener("input", edUpdate);
 document.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && !$("#editor").classList.contains("hidden")) {
+  if ($("#editor").classList.contains("hidden")) return;
+  const mod = e.ctrlKey || e.metaKey;
+  const k = e.key.toLowerCase();
+  if (mod && !e.altKey && k === "s") {
     e.preventDefault();
     edSave();
+  } else if (mod && !e.altKey && !e.shiftKey && (k === "f" || k === "h") && ed.path) {
+    e.preventDefault();
+    findOpen(k === "h");
+  } else if ((e.key === "F3" || (mod && k === "g")) && ed.path) {
+    e.preventDefault();
+    if (!findIsOpen()) findOpen();
+    else findAct(e.shiftKey ? "prev" : "next");
+  } else if (e.key === "Escape" && findIsOpen() && document.activeElement === edText) {
+    findClose();
   }
 });
 $("#open-editor").addEventListener("click", openFileEditor);

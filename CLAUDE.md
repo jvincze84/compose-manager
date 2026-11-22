@@ -97,14 +97,22 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
   - `editor.js`: `CodeEditor` — dependency-free code editor: transparent `<textarea>`
     over a highlighted `<pre>` + line-number gutter, synced by `transform` on scroll.
     Modes (`modeFor(filename)`, overridable in the footer): yaml, json, env, haproxy,
-    ini, conf (first word = directive: nginx/Caddyfile/Dockerfile), sh, plain.
+    ini, conf (first word = directive: nginx/Caddyfile/Dockerfile), sh, bind
+    (`named.conf*`, token based incl. `/* */`), zone (`db.*`, `*.zone`; tracks `( )`
+    across lines), plain. `LINE_COMMENT` = per-mode Ctrl+/ marker.
     Highlighter output must round-trip to the exact source text, or the caret drifts
     — test by stripping tags in node (`CodeEditor.highlight(mode, text)`).
     `detectIndent()` picks TAB / 2 / 4 spaces. Helpers: YAML auto-indent + list
     continuation, indent after `{[(` and HAProxy section lines, Tab/Shift+Tab block
     indent, Ctrl+/ comment (not JSON), Backspace removes one indent unit, TABs
     flagged in YAML, `setReadOnly()`. Edits go through `execCommand("insertText")` to
-    keep undo. Wrap mode hides the gutter. Font 15px, 16px ≤ 720px (iOS zooms into
+    keep undo. Wrap mode hides the gutter.
+    Search: `search(query, {caseSens, regex})` / `findNext(dir)` / `replaceCurrent()` /
+    `replaceAll()` (one `insertText` = one undo step); matches are painted as `<mark>`s
+    in `.code-marks`, a transparent copy of the text under `.code-hl` (same transform),
+    current match scrolled into view via its `offsetTop/Left`; `onSearch` callback.
+    Find bar UI (`#ed-find`) + Ctrl+F / Ctrl+H / F3 / Esc live in `files.js`;
+    localStorage `edFindCase`, `edFindRegex`. Font 15px, 16px ≤ 720px (iOS zooms into
     inputs below 16px). Files > 300 kB are not highlighted. No CDN/library on purpose
     (offline PWA, no build step).
   - `sw.js`: network-first for the shell, never caches `/api/`.
@@ -180,5 +188,5 @@ unless asked — tell them the command instead.
 Mentioned to the user, not requested yet: rename / delete / new folder in the file
 browser (deliberately not implemented: every change must stay restorable from
 backups — would need a trash / backup of deleted files first), editor tabs,
-search/replace, `haproxy -c` validation, Up/Down/edit for projects outside
+`haproxy -c` / `named-checkconf` validation, Up/Down/edit for projects outside
 `COMPOSE_DIR` (e.g. `/docker-iac`).

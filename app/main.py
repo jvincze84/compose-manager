@@ -609,8 +609,8 @@ async def api_logs(name: str, request: Request, tail: int = 200, service: str = 
 # File browser + editor for the whole COMPOSE_DIR. Everything can be viewed,
 # only files matching EDIT_EXTENSIONS / EDIT_FILENAMES can be written.
 DEFAULT_EDIT_EXTENSIONS = ("yaml,yml,json,conf,cfg,cnf,ini,toml,env,txt,md,sh,cmd,bat,xml,properties,"
-                           "service,timer,lua,py,js,css,html,j2,tmpl,template")
-DEFAULT_EDIT_FILENAMES = ".env,.env-*,.env.*,Caddyfile,Dockerfile,Makefile,crontab"
+                           "service,timer,lua,py,js,css,html,j2,tmpl,template,zone")
+DEFAULT_EDIT_FILENAMES = ".env,.env-*,.env.*,Caddyfile,Dockerfile,Makefile,crontab,named.conf*,db.*"
 # an empty value (e.g. `${EDIT_EXTENSIONS:-}` from compose) = default
 EDIT_EXTENSIONS = {e.strip().lower().lstrip(".") for e in (
     os.environ.get("EDIT_EXTENSIONS", "").strip() or DEFAULT_EDIT_EXTENSIONS).split(",") if e.strip()}
