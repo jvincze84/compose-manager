@@ -865,6 +865,49 @@ class FileSave(BaseModel):
     eol: str = "lf"       # "crlf": the file originally had CRLF line endings
 
 
+class FileNew(BaseModel):
+    dir: str = ""   # directory relative to COMPOSE_DIR
+    name: str       # plain file name, no "/"
+
+
+NEW_FILE_TEMPLATES = {
+    # a new docker-compose-<key>.yaml becomes a stack (Up / Down / Pull / Edit)
+    "compose": "services:\n  app:\n    image: \n    restart: unless-stopped\n",
+}
+
+
+@app.post("/api/fs/new")
+async def api_fs_new(body: FileNew):
+    """Create a new, whitelisted file in an existing directory. Never overwrites."""
+    name = body.name.strip()
+    if not name or name in (".", "..") or "/" in name or "\x00" in name or name.startswith(".cm-tmp-"):
+        raise HTTPException(400, "Invalid file name")
+    if not is_editable_name(name):
+        raise HTTPException(403, "This file type is not editable (EDIT_EXTENSIONS / EDIT_FILENAMES)")
+    parent, rel_dir = resolve_rel(body.dir)
+    if not parent.is_dir():
+        raise HTTPException(400, "Not a directory")
+    if not rel_dir and name == BACKUP_DIR_NAME:
+        raise HTTPException(400, "Invalid file name")
+    path, rel = resolve_rel(f"{rel_dir}/{name}" if rel_dir else name)
+    content = NEW_FILE_TEMPLATES["compose"] if COMPOSE_FILE_RE.match(name) and not rel_dir else ""
+    try:
+        # O_EXCL: fails if the file (or a symlink with that name) already exists
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        raise HTTPException(409, "A file with this name already exists")
+    except OSError as e:
+        raise HTTPException(403, f"Cannot create file: {e.strerror}")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(content)
+    st = parent.stat()
+    try:  # same owner as the directory (e.g. data dirs owned by a non-root user)
+        os.chown(path, st.st_uid, st.st_gid)
+    except OSError:
+        pass
+    return {"ok": True, "path": rel}
+
+
 @app.put("/api/fs/file")
 async def api_fs_write(body: FileSave):
     p, rel = resolve_rel(body.path)
