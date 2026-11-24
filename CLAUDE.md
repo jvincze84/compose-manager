@@ -7,8 +7,9 @@ architecture, conventions or decisions change.
 
 Compose Manager: a mobile-first PWA, running in Docker, that manages the
 `docker compose` projects on the host (list + status, start/stop/restart,
-live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
-(English, user-facing) for features, configuration and API.
+live logs, CPU/RAM stats, per-container restart and shell). Single user,
+homelab use. See `README.md` (English, user-facing) for features,
+configuration and API.
 
 ## Language conventions
 
@@ -68,6 +69,28 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
     every save, pruned to `BACKUP_KEEP`. Root dir forced to 0700. Restore has no
     endpoint on purpose: the UI loads the backup and the normal Save writes it.
     `POST /api/fs/diff` = difflib unified diff backup → editor content.
+  - Single containers (`/api/projects/{name}/containers/{container}/…`):
+    `project_container()` checks `CONTAINER_RE` and that the container's
+    `com.docker.compose.project` label equals the project (via `docker inspect`,
+    commands then use the container ID). `restart` = `docker restart`.
+  - Exec (shell): `POST …/containers/{c}/exec {cols, rows, shell, root}` (`EXEC_SHELLS`:
+    auto = bash if present else sh, bash, sh; `root` → `-u 0`) → `ExecSession` in
+    `_exec_sessions` (max `EXEC_MAX_SESSIONS` = 8). `docker exec -it` runs on a
+    `pty.openpty()` pair (the docker CLI is a session leader with the pty as
+    controlling tty via `preexec_fn` → `TIOCSWINSZ` on the master delivers SIGWINCH
+    = resize). `--detach-keys ctrl-^,ctrl-@` so Ctrl+P works in the shell.
+    Master fd read with `loop.add_reader` → incremental UTF-8 decoder → queue;
+    reader paused above 256 queued chunks (backpressure). `GET /api/exec/{id}/stream`
+    = SSE (JSON strings, coalesced; `event: end` + exit code), `POST /input {data}`,
+    `/resize`, `/close` (POST so `sendBeacon` can use it). Session is killed after
+    `EXEC_IDLE_SEC` (60) with no stream attached. **Killing `docker exec` does not
+    stop the process in the container** (verified), so each shell gets
+    `CM_EXEC=<random marker>` (not the session id) and `close()` runs `EXEC_KILL`
+    via `docker exec` **as the shell's user** (`-u 0` only for root shells: without
+    CAP_SYS_PTRACE even root can't read another uid's `/proc/*/environ` — verified):
+    HUP, then KILL every process whose environ has the marker. SSE + POST instead of
+    WebSocket on purpose: the basic auth middleware is HTTP-only, uvicorn would need
+    `websockets`, proxies need no setup.
   - Logs: SSE (`StreamingResponse`), JSON-encoded lines, `event: end` when the process
     exits, `: ping` keep-alive every 15 s; subprocess is killed on client disconnect.
   - Validation: project names `^[a-z0-9][a-z0-9_-]*$`, must exist in `compose ls`;
@@ -87,6 +110,7 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
     `starting` / `problem` are hidden while empty, the file filters while no stacks exist.
     The editor UI lives in `files.js` (loaded after `app.js`, uses its globals).
     Action output (card and editor) = `.outbox`: collapsible (▾) and closable (✕).
+    Container rows: ↻ (`crestart`, `state.busyCtr`), `>_` (`exec`, running only), Log.
   - `files.js`: editor overlay (`#editor`, global `ed` object) = file browser
     (`#ed-tree`: side panel ≥ 900 px, overlay on phones) + code editor + backups panel
     (`#ed-backups`) + output (`#ed-output`). `openFileEditor()` (✎ Editor button, reopens
@@ -107,6 +131,23 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
     indent, Ctrl+/ comment (not JSON), Backspace removes one indent unit, TABs
     flagged in YAML, `setReadOnly()`. Edits go through `execCommand("insertText")` to
     keep undo. Wrap mode hides the gutter.
+    Selected word: `sel` / `selUpdate()` (rAF-debounced on select, keyup, mouseup,
+    touchend and `selectionchange`) → all occurrences painted as `mark.sel` in the
+    same `.code-marks` layer, only while no search is open; whole-word match if the
+    selection is a whole word, substring otherwise, case-sensitive, single line,
+    ≤ 200 chars; `onSelMatches(n)` → `#ed-occ` button in the footer.
+    Multi-edit (`multiEdit()` toggle = `#ed-occ` click, or Ctrl+Shift+L; explicit on
+    purpose — the user chose it over "always", so a single occurrence can still be
+    retyped normally): `multi.ranges` (positions, copied from `sel.matches`),
+    `primary` = the one holding the caret. `beforeinput` (insertText / paste /
+    delete*) is cancelled and recomputed as "new word" → `multiApply()` writes it into
+    every range with ONE `replace()` over the span first..last (one undo step; scroll
+    restored). Non-cancelable / IME composition: native change, then `multiFromDiff()`
+    (at `compositionend` / `input`) copies the primary's new text to the others, or
+    stops if text outside the primary changed. `multi.text` = expected value; any other
+    change (file load in `paint()`), caret outside all ranges (`selUpdate`), Esc, Enter,
+    Tab, Ctrl+/, undo/redo, search → `multiStop()`. Painted as `mark.multi`.
+    Tested in node with a fake textarea + `execCommand` stub.
     Search: `search(query, {caseSens, regex})` / `findNext(dir)` / `replaceCurrent()` /
     `replaceAll()` (one `insertText` = one undo step); matches are painted as `<mark>`s
     in `.code-marks`, a transparent copy of the text under `.code-hl` (same transform),
@@ -115,6 +156,29 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
     localStorage `edFindCase`, `edFindRegex`. Font 15px, 16px ≤ 720px (iOS zooms into
     inputs below 16px). Files > 300 kB are not highlighted. No CDN/library on purpose
     (offline PWA, no build step).
+  - `term.js`: `Term` — dependency-free terminal emulator (VT100/xterm subset):
+    buffer of rows (`{c: chars[], a: attrs[]}`, attrs = shared frozen objects, `DEF`
+    = default), one `<div>` per screen row re-rendered when dirty (rAF), scrolled-off
+    lines appended to `.term-sb` (max 2000). Parser states: ground / ESC / CSI / OSC /
+    charset / ignored strings. CSI @ A–H J K L M P S T X d f m r s u h l n c,
+    DEC modes 1 (app cursor), 6, 7, 25, 47/1047/1049 (alt screen), 2004 (bracketed
+    paste); DEC line drawing (`ESC ( 0`, SO/SI). Wide chars = 1 cell (known
+    limitation). Input: hidden `.term-input` textarea kept at the cursor (phones
+    scroll it into view); `keySeq()` for special keys / Ctrl / Alt (AltGr = plain
+    char, Hungarian layout!), printable text via the `input` event **diffed against
+    a 2-space sentinel** (works with IME / autocorrect / Backspace on phone
+    keyboards). Test logic in node with DOM stubs (feed `write()`, dump `buf.lines`).
+  - `exec.js`: the `#termview` overlay (`openExec` / `closeExec`, back button via
+    `history.state.exec`), SSE + ordered/coalesced input POSTs, resize debounce,
+    key bar (`#term-keys`, pointerdown cancelled to keep the keyboard open; sticky
+    Ctrl; Paste via `navigator.clipboard`), view sized to `visualViewport` (on-screen
+    keyboard), font size A−/A+ in the key bar (localStorage `termFont`), shell select +
+    root toggle in the header (`termShell`, `termRoot`; change = reconnect),
+    `sendBeacon` close on pagehide. Uses `jsonPost()` from `files.js`.
+  - **All scripts share one global scope** (classic `<script>`s): a top-level
+    `const`/`let`/`class` declared in two files is a SyntaxError that silently kills
+    the whole later file (happened with `jsonPost` → the exec button did nothing).
+    Check for duplicates and load all files into one `vm` context in node (stub DOM).
   - `sw.js`: network-first for the shell, never caches `/api/`.
     **Bump `CACHE` (`compose-manager-vN`) whenever static files change.**
 - `Dockerfile`: `python:3.13-slim` + docker CLI and compose plugin copied from `docker:cli`.
@@ -134,8 +198,8 @@ live logs, CPU/RAM stats). Single user, homelab use. See `README.md`
   (forgejo, haproxy, openbao, semaphore, vaultwarden, directory-list),
   this app at `/opt/compose-manager`. `.env-*` files contain secrets — don't print them.
 - **Never stop/restart the user's real projects for testing.**
-- No `node` on the host. For JS syntax checks use the locally available image
-  (no pull needed):
+- No `node` on the host. For JS syntax checks use this image (pulled 2026-11-24;
+  ~GBs, now cached locally):
   `docker run --rm --network none -v "$PWD/app/static/app.js:/tmp/app.js:ro" docker.gitea.com/runner-images:ubuntu-latest node --check /tmp/app.js`
 - No headless browser is set up. A Playwright container run was declined once —
   ask before pulling large images. UI changes so far were not visually tested;
@@ -185,8 +249,8 @@ unless asked — tell them the command instead.
 
 ## Ideas / possible next steps
 
-Mentioned to the user, not requested yet: rename / delete / new folder in the file
-browser (deliberately not implemented: every change must stay restorable from
+Mentioned to the user, not requested yet: wide-character support in `term.js`,
+rename / delete / new folder in the file browser (deliberately not implemented: every change must stay restorable from
 backups — would need a trash / backup of deleted files first), editor tabs,
 `haproxy -c` / `named-checkconf` validation, Up/Down/edit for projects outside
 `COMPOSE_DIR` (e.g. `/docker-iac`).

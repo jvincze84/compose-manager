@@ -4,6 +4,8 @@
 // search / replace (marks painted in a layer under the text); YAML-friendly editing:
 // auto-indent, list continuation, Tab / Shift+Tab block indent, Ctrl+/ comment,
 // Backspace removes one indent unit, TAB characters are flagged in YAML.
+// Selecting a word highlights its occurrences; multi-edit (Ctrl+Shift+L / multiEdit())
+// then edits all of them at once.
 
 const CodeEditor = (() => {
   const INDENT = "  ";
@@ -311,14 +313,21 @@ const CodeEditor = (() => {
     const gutter = root.querySelector(".code-gutter");
     const pre = root.querySelector(".code-hl");
     const marks = root.querySelector(".code-marks");  // search matches, painted under the text
-    const ed = { mode: "yaml", indent: INDENT, errLine: 0, onCursor: null, onSearch: null, readOnly: false };
+    const ed = { mode: "yaml", indent: INDENT, errLine: 0, onCursor: null, onSearch: null, onSelMatches: null,
+      onMulti: null, readOnly: false };
     // search: re = global RegExp (null = closed), matches = [[start, end]], cur = index of the current one
     const find = { re: null, regex: false, matches: [], cur: -1, from: 0, capped: false };
     const MAX_MATCHES = 10000;
+    // occurrences of the selected word (painted like search matches while no search is open)
+    const sel = { text: "", whole: false, matches: [], raf: 0 };
+    // multi-edit: the occurrences as ranges [[start, end]] (sorted), edited together;
+    // text = the value we expect (anything else changing it ends the mode)
+    const multi = { on: false, ranges: [], primary: 0, text: "", syncing: false, composing: false };
     let raf = 0;
 
     function paint() {
       raf = 0;
+      if (multi.on && !multi.composing && !multi.syncing && ta.value !== multi.text) multiStop(false);  // e.g. file loaded
       const text = ta.value;
       pre.innerHTML = (text.length > 300000 ? escH(text) : (HIGHLIGHT[ed.mode] || HIGHLIGHT.plain)(text)) + "\n ";
       const lines = text.split("\n");
@@ -329,6 +338,8 @@ const CodeEditor = (() => {
       }
       gutter.innerHTML = g;
       findAll();
+      selFindAll();
+      ed.onSelMatches?.(sel.matches.length > 1 ? sel.matches.length : 0);
       paintMarks();
       sync();
     }
@@ -362,11 +373,14 @@ const CodeEditor = (() => {
       ed.onSearch?.(searchInfo());
     }
     function paintMarks() {
-      if (!find.re || !find.matches.length) { marks.innerHTML = ""; return; }
+      const search = !!find.re;
+      const list = multi.on ? multi.ranges : search ? find.matches : sel.matches.length > 1 ? sel.matches : [];
+      if (!list.length) { marks.innerHTML = ""; return; }
       const text = ta.value;
       let h = "", last = 0;
-      find.matches.forEach(([s, e], i) => {
-        h += escH(text.slice(last, s)) + `<mark${i === find.cur ? ' class="cur"' : ""}>${escH(text.slice(s, e))}</mark>`;
+      list.forEach(([s, e], i) => {
+        const cls = multi.on ? "multi" : search ? (i === find.cur ? "cur" : "") : "sel";
+        h += escH(text.slice(last, s)) + `<mark${cls ? ` class="${cls}"` : ""}>${escH(text.slice(s, e))}</mark>`;
         last = e;
       });
       marks.innerHTML = h + escH(text.slice(last)) + "\n ";
@@ -394,6 +408,130 @@ const CodeEditor = (() => {
       sync();
       cursor();
       ed.onSearch?.(searchInfo());
+    }
+
+    // ---- selected word: highlight every occurrence
+    const isWord = (c) => !!c && /[\p{L}\p{N}_]/u.test(c);
+    function selFindAll() {
+      sel.matches = [];
+      const { text, whole } = sel;
+      if (!text || find.re) return;
+      const v = ta.value;
+      for (let i = v.indexOf(text); i >= 0; i = v.indexOf(text, i + text.length)) {
+        if (whole && (isWord(v[i - 1]) || isWord(v[i + text.length]))) continue;
+        if (sel.matches.length >= MAX_MATCHES) break;
+        sel.matches.push([i, i + text.length]);
+      }
+    }
+    // a single-line selection without surrounding whitespace; a selected whole word
+    // only matches whole words, a part of a word matches anywhere (case-sensitive)
+    function selUpdate() {
+      sel.raf = 0;
+      const v = ta.value, a = ta.selectionStart, b = ta.selectionEnd;
+      if (multi.on) {  // moving into another occurrence switches to it, anywhere else ends the mode
+        if (multi.syncing || multi.composing) return;
+        const i = multi.ranges.findIndex(([s, e]) => s <= a && b <= e);
+        if (i < 0) multiStop();
+        else multi.primary = i;
+        return;
+      }
+      let text = "", whole = false;
+      if (b > a && b - a <= 200 && v.length <= 300000) {
+        text = v.slice(a, b);
+        if (text.includes("\n") || text !== text.trim()) text = "";
+        else whole = isWord(text[0]) && isWord(text[text.length - 1]) && !isWord(v[a - 1]) && !isWord(v[b]);
+      }
+      if (text === sel.text && whole === sel.whole) return;
+      sel.text = text;
+      sel.whole = whole;
+      selFindAll();
+      if (!find.re) paintMarks();
+      ed.onSelMatches?.(sel.matches.length > 1 ? sel.matches.length : 0);
+    }
+    const selSchedule = () => { if (!sel.raf) sel.raf = requestAnimationFrame(selUpdate); };
+
+    // ---- multi-edit: typing / deleting in one occurrence changes all of them
+    function multiStart() {
+      if (ed.readOnly || find.re || sel.matches.length < 2) return false;
+      const a = ta.selectionStart, b = ta.selectionEnd;
+      const i = sel.matches.findIndex(([s, e]) => s <= a && b <= e);
+      if (i < 0) return false;
+      Object.assign(multi, { on: true, ranges: sel.matches.map((r) => [...r]), primary: i, text: ta.value });
+      ta.focus();
+      paintMarks();
+      ed.onMulti?.(true, multi.ranges.length);
+      return true;
+    }
+    function multiStop(repaint = true) {
+      if (!multi.on) return;
+      Object.assign(multi, { on: false, ranges: [], composing: false });
+      sel.text = "";  // re-evaluate the selection highlight
+      sel.matches = [];
+      ed.onMulti?.(false, 0);
+      if (repaint) { paintMarks(); selSchedule(); }
+    }
+    // put `word` into every range (one insertText = one undo step), caret at `caret` in the primary
+    function multiApply(word, caret) {
+      const rs = multi.ranges, v = ta.value;
+      const spanS = rs[0][0], spanE = rs[rs.length - 1][1];
+      const nr = [];
+      let out = "", last = spanS, shift = 0;
+      for (const [s, e] of rs) {
+        out += v.slice(last, s) + word;
+        nr.push([s + shift, s + shift + word.length]);
+        shift += word.length - (e - s);
+        last = e;
+      }
+      out += v.slice(last, spanE);
+      const top = ta.scrollTop, left = ta.scrollLeft;
+      const pos = nr[multi.primary][0] + Math.max(0, Math.min(caret, word.length));
+      multi.syncing = true;
+      try { replace(spanS, spanE, out, pos); } finally { multi.syncing = false; }
+      ta.scrollTop = top; ta.scrollLeft = left;
+      multi.ranges = nr;
+      multi.text = ta.value;
+      paintMarks();
+      sync();
+    }
+    // the textarea changed natively (IME composition, non-cancelable input): if only the
+    // primary occurrence changed, copy it to the others, otherwise end the mode
+    function multiFromDiff() {
+      const old = multi.text, v = ta.value, [s, e] = multi.ranges[multi.primary];
+      const d = v.length - old.length;
+      if (e + d < s || v.slice(0, s) !== old.slice(0, s) || v.slice(e + d) !== old.slice(e)) { multiStop(); return; }
+      const word = v.slice(s, e + d);
+      if (word.includes("\n")) { multiStop(); return; }
+      multi.ranges = multi.ranges.map(([rs, re], i) => (i < multi.primary ? [rs, re] : i === multi.primary ? [s, e + d] : [rs + d, re + d]));
+      // the primary already holds the new word; multiApply writes it into every range
+      multiApply(word, ta.selectionEnd - s);
+    }
+    function onBeforeInput(e) {
+      if (!multi.on || multi.syncing || multi.composing || e.inputType === "insertCompositionText") return;
+      const t = e.inputType, [s, en] = multi.ranges[multi.primary];
+      const a = ta.selectionStart, b = ta.selectionEnd;
+      if (a < s || b > en) { multiStop(); return; }
+      const word = ta.value.slice(s, en), i = a - s, j = b - s;
+      let nw, caret;
+      if (/^insert(Text|ReplacementText|FromPaste|FromDrop)$/.test(t)) {
+        const data = e.data ?? e.dataTransfer?.getData("text/plain") ?? "";
+        if (data.includes("\n")) { multiStop(); return; }
+        nw = word.slice(0, i) + data + word.slice(j);
+        caret = i + data.length;
+      } else if (i < j && /^delete/.test(t)) {
+        nw = word.slice(0, i) + word.slice(j);
+        caret = i;
+      } else if (t === "deleteContentBackward" || t === "deleteWordBackward" || t === "deleteSoftLineBackward") {
+        if (!i) { e.preventDefault(); return; }  // would delete outside the occurrence
+        const k = t === "deleteContentBackward" ? i - 1 : 0;
+        nw = word.slice(0, k) + word.slice(i);
+        caret = k;
+      } else if (t === "deleteContentForward" || t === "deleteWordForward" || t === "deleteSoftLineForward") {
+        if (i === word.length) { e.preventDefault(); return; }
+        nw = word.slice(0, i) + (t === "deleteContentForward" ? word.slice(i + 1) : "");
+        caret = i;
+      } else { multiStop(); return; }               // line break, undo / redo, ...
+      e.preventDefault();
+      multiApply(nw, caret);
     }
 
     function cursor() {
@@ -432,6 +570,15 @@ const CodeEditor = (() => {
 
     function onKey(e) {
       if (ed.readOnly) return;
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        if (!multi.on) multiStart();
+        return;
+      }
+      if (multi.on) {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); multiStop(); return; }
+        if (e.key === "Enter" || e.key === "Tab" || ((e.ctrlKey || e.metaKey) && (e.key === "/" || e.code === "Slash"))) multiStop();
+      }
       const v = ta.value, a = ta.selectionStart, b = ta.selectionEnd;
       const unit = ed.indent;
       if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -495,16 +642,28 @@ const CodeEditor = (() => {
       }
     }
 
+    ta.addEventListener("beforeinput", onBeforeInput);
+    ta.addEventListener("input", () => {
+      if (multi.on && !multi.syncing && !multi.composing && ta.value !== multi.text) multiFromDiff();
+    });
+    ta.addEventListener("compositionstart", () => { if (multi.on) multi.composing = true; });
+    ta.addEventListener("compositionend", () => {
+      if (!multi.composing) return;
+      multi.composing = false;
+      setTimeout(() => { if (multi.on && ta.value !== multi.text) multiFromDiff(); });
+    });
     ta.addEventListener("input", refresh);
     ta.addEventListener("scroll", sync);
     ta.addEventListener("keydown", onKey);
     ["keyup", "click", "select", "input"].forEach((ev) => ta.addEventListener(ev, cursor));
+    ["keyup", "mouseup", "touchend", "select", "selectionchange"].forEach((ev) => ta.addEventListener(ev, selSchedule));
+    document.addEventListener("selectionchange", () => { if (document.activeElement === ta) selSchedule(); });
     new ResizeObserver(sync).observe(ta);
 
     return Object.assign(ed, {
       setMode(m) { ed.mode = HIGHLIGHT[m] ? m : "plain"; refresh(); },
       setIndent(u) { ed.indent = u || INDENT; },
-      setReadOnly(on) { ed.readOnly = on; ta.readOnly = on; root.classList.toggle("readonly", on); },
+      setReadOnly(on) { if (on) multiStop(); ed.readOnly = on; ta.readOnly = on; root.classList.toggle("readonly", on); },
       setError(line) { ed.errLine = line || 0; refresh(); },
       setWrap(on) { root.classList.toggle("wrap", on); refresh(); },
       gotoLine(n) {
@@ -518,7 +677,9 @@ const CodeEditor = (() => {
       },
       refresh: paint,
       // query "" closes the search; returns { active, count, index, capped } or { error }
+      multiEdit() { return multi.on ? (multiStop(), false) : multiStart(); },
       search(query, { caseSens = false, regex = false } = {}) {
+        multiStop(false);
         find.regex = regex;
         find.from = ta.selectionStart;
         if (!query) find.re = null;

@@ -2,15 +2,20 @@
 
 import asyncio
 import base64
+import codecs
 import difflib
+import fcntl
 import fnmatch
 import hashlib
 import html
 import json
 import os
+import pty
 import re
 import secrets
 import shlex
+import struct
+import termios
 import time
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +50,7 @@ BACKUP_DIR_NAME = ".compose-manager-backup"
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 SERVICE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
+CONTAINER_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 COMPOSE_FILE_RE = re.compile(r"^docker-compose-([A-Za-z0-9][A-Za-z0-9_.-]*?)\.ya?ml$")
 ENV_FILE_RE = re.compile(r"^\.env(-[A-Za-z0-9][A-Za-z0-9_.-]*)?$")
 RUN_FILE_RE = re.compile(r"^run-[A-Za-z0-9][A-Za-z0-9_.-]*\.(cmd|sh)$")
@@ -562,6 +568,281 @@ async def api_pull(name: str):
 
     return StreamingResponse(stream(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# --------------------------------------------------------- single containers
+async def project_container(name: str, container: str) -> dict:
+    """A container of the project (checked by its compose label) -> {id, name, status}."""
+    if not NAME_RE.match(name):
+        raise HTTPException(400, "Invalid project name")
+    if not CONTAINER_RE.match(container):
+        raise HTTPException(400, "Invalid container name")
+    code, out = await run(
+        "docker", "inspect", "--type", "container", "--format",
+        '{{.Id}}\t{{.Name}}\t{{index .Config.Labels "com.docker.compose.project"}}\t{{.State.Status}}',
+        container, timeout=30)
+    parts = out.strip().split("\t")
+    if code != 0 or len(parts) < 4 or parts[2] != name:
+        raise HTTPException(404, "No such container in this project")
+    return {"id": parts[0], "name": parts[1].lstrip("/"), "status": parts[3]}
+
+
+@app.post("/api/projects/{name}/containers/{container}/restart")
+async def api_container_restart(name: str, container: str):
+    c = await project_container(name, container)
+    code, out = await run("docker", "restart", c["id"])
+    return JSONResponse(
+        {"ok": code == 0, "command": f"restart {c['name']}", "output": "" if code == 0 else out},
+        status_code=200 if code == 0 else 500,
+    )
+
+
+# --------------------------------------------------------------- exec (shell)
+# `docker exec -it` runs on a pty owned by this process. The browser reads the
+# output as SSE (/api/exec/{id}/stream) and sends keystrokes with POST
+# (/api/exec/{id}/input) - plain HTTP, so basic auth and proxies just work.
+EXEC_MAX_SESSIONS = 8
+EXEC_IDLE_SEC = 60        # no stream attached for this long -> the session is killed
+EXEC_SHELL = 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'
+# Killing `docker exec` does not end the process in the container (dockerd keeps it
+# running), so every shell gets a CM_EXEC=<marker> env var; on close every process in
+# the container carrying it (the shell and its children) gets SIGHUP, then SIGKILL.
+# The killer runs as the shell's user (root can't read other uids' environ in docker).
+EXEC_KILL = ('k() { for p in /proc/[0-9]*; do '
+             'if tr "\\0" "\\n" < "$p/environ" 2>/dev/null | grep -qx "CM_EXEC=$1"; then '
+             'kill -$2 "${p#/proc/}" 2>/dev/null; fi; done; }; k "$1" HUP; sleep 1; k "$1" KILL')
+_bg_tasks: set[asyncio.Task] = set()
+
+
+class ExecSession:
+    def __init__(self, sid: str, container: dict, proc, fd: int, marker: str, root: bool):
+        self.id, self.container, self.proc, self.fd, self.marker = sid, container, proc, fd, marker
+        self.root = root
+        self.q: asyncio.Queue = asyncio.Queue()
+        self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        self.attached = 0
+        self.detached_at = time.monotonic()
+        self.paused = False
+        self.closed = False
+        loop = asyncio.get_running_loop()
+        loop.add_reader(fd, self._on_read)
+        self.waiter = asyncio.create_task(self._wait())
+        self.reaper = asyncio.create_task(self._reap())
+
+    def _on_read(self):
+        try:
+            data = os.read(self.fd, 65536)
+        except BlockingIOError:
+            return
+        except OSError:  # EIO: the other side of the pty is closed
+            data = b""
+        if not data:
+            asyncio.get_running_loop().remove_reader(self.fd)
+            return
+        text = self.decoder.decode(data)
+        if text:
+            self.q.put_nowait(text)
+        if self.q.qsize() > 256 and not self.paused:  # nobody reads: stop reading (backpressure)
+            asyncio.get_running_loop().remove_reader(self.fd)
+            self.paused = True
+
+    def resume(self):
+        if self.paused and not self.closed and self.q.qsize() < 64:
+            self.paused = False
+            asyncio.get_running_loop().add_reader(self.fd, self._on_read)
+
+    async def _wait(self):
+        code = await self.proc.wait()
+        await asyncio.sleep(0.2)  # let the reader drain the last output
+        self.resume()
+        self._on_read_rest()
+        self.close()  # queues {"exit": code}
+
+    def _on_read_rest(self):
+        while not self.closed:
+            try:
+                data = os.read(self.fd, 65536)
+            except OSError:
+                break
+            if not data:
+                break
+            self.q.put_nowait(self.decoder.decode(data))
+
+    async def _reap(self):
+        while not self.closed:
+            await asyncio.sleep(10)
+            if not self.attached and time.monotonic() - self.detached_at > EXEC_IDLE_SEC:
+                self.close()
+
+    def write(self, data: bytes):
+        view = memoryview(data)
+        while view:
+            try:
+                n = os.write(self.fd, view)
+            except BlockingIOError:
+                return False  # pty buffer full - the rest is dropped
+            view = view[n:]
+        return True
+
+    def resize(self, cols: int, rows: int):
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        _exec_sessions.pop(self.id, None)
+        try:
+            asyncio.get_running_loop().remove_reader(self.fd)
+        except Exception:
+            pass
+        if self.proc.returncode is None:
+            try:
+                self.proc.kill()
+            except ProcessLookupError:
+                pass
+            # as the shell's user: without CAP_SYS_PTRACE even root can't read the
+            # /proc/*/environ of another uid's processes
+            task = asyncio.create_task(run(
+                "docker", "exec", *(["-u", "0"] if self.root else []), self.container["id"],
+                "sh", "-c", EXEC_KILL, "sh", self.marker, timeout=30))
+            _bg_tasks.add(task)
+            task.add_done_callback(_bg_tasks.discard)
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        self.q.put_nowait({"exit": self.proc.returncode})
+        if asyncio.current_task() is not self.reaper:
+            self.reaper.cancel()
+
+
+_exec_sessions: dict[str, ExecSession] = {}
+
+
+def _set_ctty():  # runs in the child: the pty becomes its controlling terminal (SIGWINCH)
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+
+class ExecSize(BaseModel):
+    cols: int = 80
+    rows: int = 24
+
+
+EXEC_SHELLS = {  # shell -> command run in the container
+    "auto": ["sh", "-c", EXEC_SHELL],  # bash if the image has it, else sh
+    "bash": ["bash"],
+    "sh": ["sh"],
+}
+
+
+class ExecStart(ExecSize):
+    shell: str = "auto"
+    root: bool = False  # docker exec -u 0 instead of the container's default user
+
+
+class ExecInput(BaseModel):
+    data: str
+
+
+@app.post("/api/projects/{name}/containers/{container}/exec")
+async def api_exec_start(name: str, container: str, body: ExecStart):
+    c = await project_container(name, container)
+    if c["status"] != "running":
+        raise HTTPException(400, "The container is not running")
+    if body.shell not in EXEC_SHELLS:
+        raise HTTPException(400, "Unknown shell")
+    if len(_exec_sessions) >= EXEC_MAX_SESSIONS:
+        raise HTTPException(429, "Too many open shells")
+    cols, rows = max(10, min(body.cols, 500)), max(4, min(body.rows, 200))
+    marker = secrets.token_hex(8)  # not the session id: processes in the container can read it
+    master, slave = pty.openpty()
+    fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+    os.set_blocking(master, False)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", "-it", "--detach-keys", "ctrl-^,ctrl-@", *(["-u", "0"] if body.root else []),
+            "-e", "TERM=xterm-256color", "-e", f"CM_EXEC={marker}", c["id"], *EXEC_SHELLS[body.shell],
+            stdin=slave, stdout=slave, stderr=slave,
+            start_new_session=True, preexec_fn=_set_ctty,
+        )
+    except Exception as e:
+        os.close(master)
+        raise HTTPException(500, f"Cannot start docker exec: {e}")
+    finally:
+        os.close(slave)
+    sid = secrets.token_urlsafe(18)
+    _exec_sessions[sid] = ExecSession(sid, c, proc, master, marker, body.root)
+    return {"id": sid, "container": c["name"], "shell": body.shell, "root": body.root}
+
+
+def exec_session(sid: str) -> ExecSession:
+    s = _exec_sessions.get(sid)
+    if not s:
+        raise HTTPException(404, "No such shell session (closed or timed out)")
+    return s
+
+
+@app.get("/api/exec/{sid}/stream")
+async def api_exec_stream(sid: str, request: Request):
+    """SSE: data = JSON string (terminal output); event `end` (data = exit code) when the shell exits."""
+    s = exec_session(sid)
+
+    async def stream():
+        s.attached += 1
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    item = await asyncio.wait_for(s.q.get(), 15)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                chunks, end = [], None
+                while True:  # coalesce what is already queued into one message
+                    if isinstance(item, dict):
+                        end = item
+                        break
+                    chunks.append(item)
+                    if s.q.empty() or sum(map(len, chunks)) > 65536:
+                        break
+                    item = s.q.get_nowait()
+                s.resume()
+                if chunks:
+                    yield "data: " + json.dumps("".join(chunks), ensure_ascii=False) + "\n\n"
+                if end is not None:
+                    yield f"event: end\ndata: {json.dumps(end.get('exit'))}\n\n"
+                    break
+        finally:
+            s.attached -= 1
+            s.detached_at = time.monotonic()
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/exec/{sid}/input")
+async def api_exec_input(sid: str, body: ExecInput):
+    s = exec_session(sid)
+    data = body.data.encode("utf-8")
+    if len(data) > 65536:
+        raise HTTPException(413, "Input too large")
+    return {"ok": s.write(data)}
+
+
+@app.post("/api/exec/{sid}/resize")
+async def api_exec_resize(sid: str, body: ExecSize):
+    exec_session(sid).resize(max(10, min(body.cols, 500)), max(4, min(body.rows, 200)))
+    return {"ok": True}
+
+
+@app.post("/api/exec/{sid}/close")
+async def api_exec_close(sid: str):
+    s = _exec_sessions.get(sid)
+    if s:
+        s.close()
+    return {"ok": True}
 
 
 @app.get("/api/projects/{name}/logs")

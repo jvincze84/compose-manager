@@ -292,6 +292,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: transparent; pointer-events: none; will-change: transform;
 }
 .code-marks mark { color: transparent; background: rgba(250, 204, 21, 0.28); border-radius: 2px; }
+/* occurrences of the selected word */
+.code-marks mark.multi { background: rgba(167, 139, 250, 0.3); box-shadow: 0 0 0 1px #a78bfa; }
+/* emptied occurrence: a thin line (outline takes no space, so the layer stays aligned) */
+.code-marks mark.multi:empty { box-shadow: none; outline: 1px solid #a78bfa; }
+.code-marks mark.sel { background: rgba(96, 165, 250, 0.22); box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.55); }
 .code-marks mark.cur { background: rgba(249, 115, 22, 0.75); box-shadow: 0 0 0 1px #fb923c; }
 .code-input {
   position: absolute; inset: 0; width: 100%; height: 100%;
@@ -373,6 +378,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ed-output { margin: 0; border-radius: 0; border-width: 2px 0 0; }
 .ed-output .outbox-body { max-height: 30vh; }
 .ed-pos { font-variant-numeric: tabular-nums; min-width: 3.5em; }
+.ed-occ {
+  font-variant-numeric: tabular-nums; color: #93c5fd; font-size: 0.82rem;
+  padding: 3px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--card2);
+}
+.ed-occ.active { color: #fff; border-color: #a78bfa; background: rgba(167, 139, 250, 0.3); }
 #ed-check:disabled { opacity: 0.35; cursor: default; }
 .save-btn { color: var(--green); font-weight: 600; padding: 8px 14px; }
 .save-btn:disabled, #ed-save-up:disabled, #ed-check:disabled { opacity: 0.35; cursor: default; }
@@ -476,3 +486,43 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #ed-find-btn { width: 36px; height: 36px; font-size: 1rem; }
 #ed-find-btn:disabled { opacity: 0.35; cursor: default; }
 #ed-find-btn.active { border-color: var(--blue); background: #1e2a4d; }
+
+/* ---------- containers: restart / exec ---------- */
+.svc .small-btn.c-restart { color: var(--yellow); }
+.svc .small-btn.c-exec { color: #a78bfa; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.svc .small-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ---------- exec: terminal ---------- */
+.termview { bottom: auto; height: 100%; }
+#term {
+  flex: 1; min-height: 0; position: relative; overflow: auto; padding: 6px 8px;
+  background: #050811; color: #d1d5db; -webkit-overflow-scrolling: touch;
+  --term-size: 13px;
+  font: var(--term-size)/1.25 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-variant-ligatures: none; cursor: text;
+}
+.term-sb > div, .term-screen > div { white-space: pre; height: calc(var(--term-size) * 1.25); overflow: hidden; }
+.term-measure { position: absolute; visibility: hidden; white-space: pre; left: 0; top: 0; display: inline-block; line-height: 1.25; }
+.term-cur { outline: 1px solid #94a3b8; }
+#term.focus .term-cur { background: #d1d5db; color: #050811; outline: 0; }
+/* invisible input at the cursor (phone keyboards, IME); 16px = no zoom on iOS */
+.term-input {
+  position: absolute; width: 2px; height: 1.2em; padding: 0; border: 0; margin: 0;
+  font-size: 16px; opacity: 0; resize: none; overflow: hidden; outline: 0;
+  color: transparent; background: transparent; caret-color: transparent; z-index: -1;
+}
+.term-keys {
+  display: flex; gap: 4px; padding: 6px 8px calc(6px + var(--safe-bottom));
+  background: var(--card); border-top: 1px solid var(--border);
+  overflow-x: auto; scrollbar-width: none;
+}
+.term-keys::-webkit-scrollbar { display: none; }
+.term-keys button {
+  flex: none; min-width: 40px; height: 34px; padding: 0 8px; border-radius: 7px;
+  background: var(--card2); border: 1px solid var(--border); color: var(--text);
+  font: 0.85rem ui-monospace, Menlo, Consolas, monospace;
+}
+.term-keys button.active { border-color: var(--blue); background: #1e2a4d; color: #93c5fd; }
+#term-reconnect { color: var(--green); }
+#term-root { font-family: ui-monospace, Menlo, Consolas, monospace; }
+#term-root.active { color: var(--red); border-color: var(--red); background: rgba(239, 68, 68, 0.12); }

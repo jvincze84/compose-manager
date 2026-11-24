@@ -24,7 +24,12 @@ Docker socket.
   original is always kept)
 - **Project summary:** running/total containers, CPU, memory (incl. % of host),
   network and disk I/O, PIDs, published ports, compose file path
-- **Per-service details:** state, health, image, ports, CPU and memory bars
+- **Per-service details:** state, health, image, ports, CPU and memory bars;
+  per container **↻ restart** (`docker restart`), **>_ shell** and **Log**
+- **Shell in a container** (`>_`): an interactive terminal (`docker exec -it`;
+  auto = `bash` if the image has it, otherwise `sh`, or pick one; optionally
+  as **root**) in the browser — colours, `vi`,
+  `top`, `less` work; key bar for phones (Esc, Tab, Ctrl, arrows, `|`, `~` …)
 - **Live logs** (Server-Sent Events) for a whole project or a single service,
   with tail size, follow and line-wrap options and error/warning highlighting
 - Expand / collapse all, remembered filter and open cards (localStorage)
@@ -132,6 +137,14 @@ A full-screen editor with a **file browser** for the whole `COMPOSE_DIR`
   through them; match case (`Aa`) and regular expressions (`.*`, `$1` in the
   replacement) are optional. Replace / All work only on editable files and
   can be undone with Ctrl+Z (All is a single undo step).
+- **Selecting a word highlights all its occurrences** (whole words only when
+  a whole word is selected, case-sensitive; any single-line selection works);
+  the footer shows the count (`3× ✎`). Hidden while the find bar is open.
+- **Edit all occurrences at once:** tap `3× ✎` (or press Ctrl+Shift+L) while
+  they are highlighted; typing, Backspace / Delete and paste then change every
+  occurrence (one Ctrl+Z undoes a keystroke everywhere). Tapping another
+  occurrence continues there. Esc, tapping `✎` again, Enter, Tab, undo or
+  moving the cursor outside the occurrences ends it.
 - **✓ Check** validates without saving: `docker compose config -q` for files
   used by a stack (`-f` / `--env-file`), YAML parse for other `.yaml/.yml`,
   JSON parse for `.json`. Errors mark and jump to the offending line. Saving
@@ -144,6 +157,39 @@ A full-screen editor with a **file browser** for the whole `COMPOSE_DIR`
   `services:` template and immediately shows up as a project (Up to start it).
   The new file gets the owner of its directory.
 - Files are rewritten in place, so owner and permissions are preserved.
+
+### Shell in a container (`>_`)
+
+Each container row has a **>_** button (only for running containers). It opens
+a full-screen terminal running `docker exec -it <container> <shell>` on a
+pseudo-terminal inside the app (`TERM=xterm-256color`).
+
+- **Shell** (header): `auto` (bash if the image has it, otherwise sh),
+  `bash` or `sh`. **root** runs it as root (`docker exec -u 0`) instead of
+  the container's default user. Changing either opens a new shell; both are
+  remembered.
+
+- The terminal emulator is built in (no library, works offline): cursor
+  movement, colours (16 / 256 / true colour), the alternate screen (`vi`,
+  `less`, `top`, `htop`), line drawing, application cursor keys, bracketed
+  paste. Wide (CJK / emoji) characters are treated as one column.
+- The size follows the window (`stty size` is kept up to date); **A− / A+**
+  (key bar) changes the font size (remembered).
+- Phones: tap the terminal to bring up the keyboard; the key bar adds Esc,
+  Tab, a sticky **Ctrl** (applies to the next key), ^C, ^D, arrows and a few
+  symbols, and **Paste** (clipboard; needs HTTPS). Desktop: Ctrl+C copies
+  when text is selected, otherwise it is sent to the shell; Ctrl+V pastes.
+- Output streams over SSE, keystrokes are sent with POST — plain HTTP, so
+  basic auth and reverse proxies need no WebSocket setup.
+- The shell is ended when you close the view, close the tab, or after 60 s
+  without a connected page (e.g. lost network). Since stopping `docker exec`
+  does not stop the process in the container, every shell is started with a
+  `CM_EXEC=<random>` environment variable and on close every process carrying
+  it (the shell and what it started) gets `SIGHUP`, then `SIGKILL`.
+  Processes that drop their environment (e.g. `su -`, `sudo -i`) are not
+  caught. Background jobs started with `nohup … &` are killed too.
+- At most 8 shells at a time. Containers without `sh` (distroless images)
+  can't be used.
 
 ### Backups
 
@@ -200,6 +246,12 @@ between that backup and the editor's current content.
 | `GET /api/fs/backup?path=&id=` | Content of one backup (`id` = timestamp or `original`) |
 | `POST /api/fs/diff` | Unified diff of `{path, id}` backup vs. `{content}` |
 | `GET /api/projects/{name}/logs?tail=200&follow=true&service=` | Log stream (SSE) |
+| `POST /api/projects/{name}/containers/{container}/restart` | `docker restart` one container of the project |
+| `POST /api/projects/{name}/containers/{container}/exec` | Start a shell `{cols, rows, shell: auto\|bash\|sh, root}` → `{id}` (running containers only, 429 above 8 shells) |
+| `GET /api/exec/{id}/stream` | Terminal output (SSE, JSON strings); `event: end` with the exit code |
+| `POST /api/exec/{id}/input` | Keystrokes `{data}` |
+| `POST /api/exec/{id}/resize` | Terminal size `{cols, rows}` |
+| `POST /api/exec/{id}/close` | End the shell |
 | `GET /api/stats` | CPU / memory / IO per project and container |
 
 ## PWA / installing on a phone
@@ -207,7 +259,8 @@ between that backup and the editor's current content.
 "Add to Home Screen" and the service worker require **HTTPS** (or
 `localhost`), so put the app behind a reverse proxy (Traefik, Caddy,
 Nginx Proxy Manager, …). Disable response buffering for the log stream
-(nginx: `proxy_buffering off;` — the app also sends `X-Accel-Buffering: no`).
+and the shell output (nginx: `proxy_buffering off;` — the app also sends
+`X-Accel-Buffering: no`).
 
 The app name is captured at install time; after changing `APP_NAME`
 reinstall the app (Chrome on Android may also update it by itself later).
@@ -217,7 +270,8 @@ reinstall the app (Chrome on Android may also update it by itself later).
 Access to `/var/run/docker.sock` is effectively **root on the host**.
 Always set `AUTH_USER` / `AUTH_PASSWORD` and do not expose the app directly to
 the internet — use a VPN (WireGuard, Tailscale, …) or an authenticating
-reverse proxy.
+reverse proxy. The **>_ shell** button gives a shell in any of your compose
+containers to whoever can open the app.
 
 ## Development
 
@@ -225,7 +279,9 @@ reverse proxy.
 app/main.py            FastAPI backend (wraps the docker / docker compose CLI)
 app/static/            Frontend: plain HTML/CSS/JS, no build step
   index.html           {{APP_NAME}} placeholders are filled in by the backend
-  app.js, style.css
+  app.js, style.css     project list, actions, log view
+  files.js, editor.js  file browser + code editor
+  term.js, exec.js     terminal emulator + shell view
   sw.js                service worker (bump CACHE when static files change)
   manifest.webmanifest name/short_name are overridden by the backend
 Dockerfile             python:slim + docker CLI & compose plugin from docker:cli
