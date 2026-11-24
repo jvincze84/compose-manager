@@ -19,7 +19,22 @@ const edText = $("#ed-text");
 const cm = CodeEditor.create($("#ed-code"), edText);
 cm.onCursor = (line, col) => { $("#ed-pos").textContent = `${line}:${col}`; };
 // occurrences of the selected word (0 = none / search open)
-cm.onSelMatches = (n) => { $("#ed-occ").textContent = n ? `${n}×` : ""; $("#ed-occ").title = n ? `${n} occurrences of the selection` : ""; };
+// tapping it (or Ctrl+Shift+L) = multi-edit: typing changes every occurrence
+let edMulti = false;
+function edOccShow(n) {
+  const b = $("#ed-occ");
+  b.classList.toggle("hidden", !n);
+  b.classList.toggle("active", edMulti);
+  b.setAttribute("aria-pressed", String(edMulti));
+  b.textContent = n ? `${n}× ✎` : "";
+  b.title = edMulti ? `Editing all ${n} occurrences together – Esc / tap to stop`
+    : `${n} occurrences of the selection – tap (Ctrl+Shift+L) to edit them all at once`;
+}
+cm.onSelMatches = (n) => { if (!edMulti) edOccShow(n); };
+cm.onMulti = (on, n) => { edMulti = on; edOccShow(n); };
+// keep the focus (and the phone keyboard) in the editor
+$("#ed-occ").addEventListener("pointerdown", (e) => e.preventDefault());
+$("#ed-occ").addEventListener("click", () => cm.multiEdit());
 const WIDE = window.matchMedia("(min-width: 900px)");
 const qs = (o) => new URLSearchParams(o).toString();
 const edDirty = () => ed.path !== null && !!ed.info?.editable && edText.value !== ed.orig;

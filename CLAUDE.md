@@ -135,7 +135,19 @@ configuration and API.
     touchend and `selectionchange`) → all occurrences painted as `mark.sel` in the
     same `.code-marks` layer, only while no search is open; whole-word match if the
     selection is a whole word, substring otherwise, case-sensitive, single line,
-    ≤ 200 chars; `onSelMatches(n)` → `#ed-occ` in the footer.
+    ≤ 200 chars; `onSelMatches(n)` → `#ed-occ` button in the footer.
+    Multi-edit (`multiEdit()` toggle = `#ed-occ` click, or Ctrl+Shift+L; explicit on
+    purpose — the user chose it over "always", so a single occurrence can still be
+    retyped normally): `multi.ranges` (positions, copied from `sel.matches`),
+    `primary` = the one holding the caret. `beforeinput` (insertText / paste /
+    delete*) is cancelled and recomputed as "new word" → `multiApply()` writes it into
+    every range with ONE `replace()` over the span first..last (one undo step; scroll
+    restored). Non-cancelable / IME composition: native change, then `multiFromDiff()`
+    (at `compositionend` / `input`) copies the primary's new text to the others, or
+    stops if text outside the primary changed. `multi.text` = expected value; any other
+    change (file load in `paint()`), caret outside all ranges (`selUpdate`), Esc, Enter,
+    Tab, Ctrl+/, undo/redo, search → `multiStop()`. Painted as `mark.multi`.
+    Tested in node with a fake textarea + `execCommand` stub.
     Search: `search(query, {caseSens, regex})` / `findNext(dir)` / `replaceCurrent()` /
     `replaceAll()` (one `insertText` = one undo step); matches are painted as `<mark>`s
     in `.code-marks`, a transparent copy of the text under `.code-hl` (same transform),

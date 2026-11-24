@@ -293,6 +293,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .code-marks mark { color: transparent; background: rgba(250, 204, 21, 0.28); border-radius: 2px; }
 /* occurrences of the selected word */
+.code-marks mark.multi { background: rgba(167, 139, 250, 0.3); box-shadow: 0 0 0 1px #a78bfa; }
+/* emptied occurrence: a thin line (outline takes no space, so the layer stays aligned) */
+.code-marks mark.multi:empty { box-shadow: none; outline: 1px solid #a78bfa; }
 .code-marks mark.sel { background: rgba(96, 165, 250, 0.22); box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.55); }
 .code-marks mark.cur { background: rgba(249, 115, 22, 0.75); box-shadow: 0 0 0 1px #fb923c; }
 .code-input {
@@ -375,8 +378,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ed-output { margin: 0; border-radius: 0; border-width: 2px 0 0; }
 .ed-output .outbox-body { max-height: 30vh; }
 .ed-pos { font-variant-numeric: tabular-nums; min-width: 3.5em; }
-.ed-occ { font-variant-numeric: tabular-nums; color: #93c5fd; }
-.ed-occ:empty { display: none; }
+.ed-occ {
+  font-variant-numeric: tabular-nums; color: #93c5fd; font-size: 0.82rem;
+  padding: 3px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--card2);
+}
+.ed-occ.active { color: #fff; border-color: #a78bfa; background: rgba(167, 139, 250, 0.3); }
 #ed-check:disabled { opacity: 0.35; cursor: default; }
 .save-btn { color: var(--green); font-weight: 600; padding: 8px 14px; }
 .save-btn:disabled, #ed-save-up:disabled, #ed-check:disabled { opacity: 0.35; cursor: default; }

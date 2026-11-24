@@ -139,7 +139,12 @@ A full-screen editor with a **file browser** for the whole `COMPOSE_DIR`
   can be undone with Ctrl+Z (All is a single undo step).
 - **Selecting a word highlights all its occurrences** (whole words only when
   a whole word is selected, case-sensitive; any single-line selection works);
-  the footer shows the count (`3×`). Hidden while the find bar is open.
+  the footer shows the count (`3× ✎`). Hidden while the find bar is open.
+- **Edit all occurrences at once:** tap `3× ✎` (or press Ctrl+Shift+L) while
+  they are highlighted; typing, Backspace / Delete and paste then change every
+  occurrence (one Ctrl+Z undoes a keystroke everywhere). Tapping another
+  occurrence continues there. Esc, tapping `✎` again, Enter, Tab, undo or
+  moving the cursor outside the occurrences ends it.
 - **✓ Check** validates without saving: `docker compose config -q` for files
   used by a stack (`-f` / `--env-file`), YAML parse for other `.yaml/.yml`,
   JSON parse for `.json`. Errors mark and jump to the offending line. Saving
