@@ -8,6 +8,7 @@ const state = {
   open: new Set(JSON.parse(localStorage.getItem("open") || "[]")),
   services: {},   // name -> [service]
   busy: {},       // name -> action
+  busyCtr: {},    // container name -> true (container restart running)
   output: {},     // name -> {ok, text}
   filter: "",
   stateFilter: localStorage.getItem("stateFilter") || "all",
@@ -130,6 +131,10 @@ function serviceHtml(p) {
         <span class="muted">${esc(s.status)}${s.health ? " · " + esc(s.health) : ""}</span>
         <span class="muted">${esc(s.image)}${ports ? " · " + esc(ports) : ""}</span>
       </div>
+      <button class="small-btn c-restart" data-act="crestart" data-name="${esc(p.name)}" data-ctr="${esc(s.name)}"
+        title="Restart this container" aria-label="Restart container" ${state.busyCtr[s.name] || state.busy[p.name] ? "disabled" : ""}>${state.busyCtr[s.name] ? "…" : "↻"}</button>
+      <button class="small-btn c-exec" data-act="exec" data-name="${esc(p.name)}" data-ctr="${esc(s.name)}"
+        title="Open a shell in this container" aria-label="Shell" ${s.state === "running" ? "" : "disabled"}>&gt;_</button>
       <button class="small-btn" data-act="logs" data-name="${esc(p.name)}" data-svc="${esc(s.service)}">Log</button>
       ${containerStatsHtml(p.name, s.name)}
     </div>`;
@@ -375,6 +380,23 @@ async function doPull(name) {
   }
 }
 
+// a single container: docker restart
+async function doContainerRestart(name, ctr) {
+  if (!confirm(`Restart container "${ctr}"?`)) return;
+  state.busyCtr[ctr] = true;
+  render();
+  try {
+    await api(`api/projects/${encodeURIComponent(name)}/containers/${encodeURIComponent(ctr)}/restart`, { method: "POST" });
+    toast(`${ctr}: restarted`);
+  } catch (e) {
+    toast(`${ctr}: restart error`, true);
+    state.output[name] = { ok: false, text: e.body?.output || e.message, title: `restart ${ctr}: error` };
+  } finally {
+    delete state.busyCtr[ctr];
+    await loadProjects();
+  }
+}
+
 function saveOpen() {
   localStorage.setItem("open", JSON.stringify([...state.open]));
 }
@@ -501,10 +523,12 @@ $("#projects").addEventListener("click", (e) => {
   const el = e.target.closest("[data-act]");
   if (!el) return;
   if (el.disabled) return;
-  const { act, name, svc, file } = el.dataset;
+  const { act, name, svc, file, ctr } = el.dataset;
   if (act === "toggle") toggle(name);
   else if (act === "edit") openEditor(name, file);
   else if (act === "logs") openLogs(name, svc || "");
+  else if (act === "crestart") doContainerRestart(name, ctr);
+  else if (act === "exec") openExec(name, ctr);
   else if (act === "clear-output") { delete state.output[name]; render(); }
   else if (act === "out-toggle") {
     if (state.output[name]) state.output[name].collapsed = !state.output[name].collapsed;
@@ -532,16 +556,18 @@ $("#log-follow").addEventListener("change", startLogStream);
 $("#log-wrap").addEventListener("change", (e) => $("#log-output").classList.toggle("wrap", e.target.checked));
 $("#log-output").classList.toggle("wrap", $("#log-wrap").checked);
 $("#log-bottom").addEventListener("click", () => { const o = $("#log-output"); o.scrollTop = o.scrollHeight; });
-// the Android "back" button closes the log view / editor
+// the Android "back" button closes the log view / editor / shell
 window.addEventListener("popstate", () => {
   if (!$("#logview").classList.contains("hidden")) closeLogs(true);
+  else if (!$("#termview").classList.contains("hidden")) closeExec(true);
   else if (!$("#editor").classList.contains("hidden")) editorPopstate();
 });
 
 // auto refresh, only while the page is visible
 setInterval(() => {
   if (document.visibilityState === "visible" && $("#logview").classList.contains("hidden")
-      && $("#editor").classList.contains("hidden") && !Object.keys(state.busy).length) loadProjects();
+      && $("#editor").classList.contains("hidden") && $("#termview").classList.contains("hidden")
+      && !Object.keys(state.busy).length) loadProjects();
 }, REFRESH_MS);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") loadProjects();

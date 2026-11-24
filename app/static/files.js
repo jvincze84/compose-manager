@@ -18,6 +18,8 @@ const ed = {
 const edText = $("#ed-text");
 const cm = CodeEditor.create($("#ed-code"), edText);
 cm.onCursor = (line, col) => { $("#ed-pos").textContent = `${line}:${col}`; };
+// occurrences of the selected word (0 = none / search open)
+cm.onSelMatches = (n) => { $("#ed-occ").textContent = n ? `${n}×` : ""; $("#ed-occ").title = n ? `${n} occurrences of the selection` : ""; };
 const WIDE = window.matchMedia("(min-width: 900px)");
 const qs = (o) => new URLSearchParams(o).toString();
 const edDirty = () => ed.path !== null && !!ed.info?.editable && edText.value !== ed.orig;

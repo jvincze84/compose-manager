@@ -311,10 +311,12 @@ const CodeEditor = (() => {
     const gutter = root.querySelector(".code-gutter");
     const pre = root.querySelector(".code-hl");
     const marks = root.querySelector(".code-marks");  // search matches, painted under the text
-    const ed = { mode: "yaml", indent: INDENT, errLine: 0, onCursor: null, onSearch: null, readOnly: false };
+    const ed = { mode: "yaml", indent: INDENT, errLine: 0, onCursor: null, onSearch: null, onSelMatches: null, readOnly: false };
     // search: re = global RegExp (null = closed), matches = [[start, end]], cur = index of the current one
     const find = { re: null, regex: false, matches: [], cur: -1, from: 0, capped: false };
     const MAX_MATCHES = 10000;
+    // occurrences of the selected word (painted like search matches while no search is open)
+    const sel = { text: "", whole: false, matches: [], raf: 0 };
     let raf = 0;
 
     function paint() {
@@ -329,6 +331,8 @@ const CodeEditor = (() => {
       }
       gutter.innerHTML = g;
       findAll();
+      selFindAll();
+      ed.onSelMatches?.(sel.matches.length > 1 ? sel.matches.length : 0);
       paintMarks();
       sync();
     }
@@ -362,11 +366,14 @@ const CodeEditor = (() => {
       ed.onSearch?.(searchInfo());
     }
     function paintMarks() {
-      if (!find.re || !find.matches.length) { marks.innerHTML = ""; return; }
+      const search = !!find.re;
+      const list = search ? find.matches : sel.matches.length > 1 ? sel.matches : [];
+      if (!list.length) { marks.innerHTML = ""; return; }
       const text = ta.value;
       let h = "", last = 0;
-      find.matches.forEach(([s, e], i) => {
-        h += escH(text.slice(last, s)) + `<mark${i === find.cur ? ' class="cur"' : ""}>${escH(text.slice(s, e))}</mark>`;
+      list.forEach(([s, e], i) => {
+        const cls = search ? (i === find.cur ? "cur" : "") : "sel";
+        h += escH(text.slice(last, s)) + `<mark${cls ? ` class="${cls}"` : ""}>${escH(text.slice(s, e))}</mark>`;
         last = e;
       });
       marks.innerHTML = h + escH(text.slice(last)) + "\n ";
@@ -395,6 +402,39 @@ const CodeEditor = (() => {
       cursor();
       ed.onSearch?.(searchInfo());
     }
+
+    // ---- selected word: highlight every occurrence
+    const isWord = (c) => !!c && /[\p{L}\p{N}_]/u.test(c);
+    function selFindAll() {
+      sel.matches = [];
+      const { text, whole } = sel;
+      if (!text || find.re) return;
+      const v = ta.value;
+      for (let i = v.indexOf(text); i >= 0; i = v.indexOf(text, i + text.length)) {
+        if (whole && (isWord(v[i - 1]) || isWord(v[i + text.length]))) continue;
+        if (sel.matches.length >= MAX_MATCHES) break;
+        sel.matches.push([i, i + text.length]);
+      }
+    }
+    // a single-line selection without surrounding whitespace; a selected whole word
+    // only matches whole words, a part of a word matches anywhere (case-sensitive)
+    function selUpdate() {
+      sel.raf = 0;
+      const v = ta.value, a = ta.selectionStart, b = ta.selectionEnd;
+      let text = "", whole = false;
+      if (b > a && b - a <= 200 && v.length <= 300000) {
+        text = v.slice(a, b);
+        if (text.includes("\n") || text !== text.trim()) text = "";
+        else whole = isWord(text[0]) && isWord(text[text.length - 1]) && !isWord(v[a - 1]) && !isWord(v[b]);
+      }
+      if (text === sel.text && whole === sel.whole) return;
+      sel.text = text;
+      sel.whole = whole;
+      selFindAll();
+      if (!find.re) paintMarks();
+      ed.onSelMatches?.(sel.matches.length > 1 ? sel.matches.length : 0);
+    }
+    const selSchedule = () => { if (!sel.raf) sel.raf = requestAnimationFrame(selUpdate); };
 
     function cursor() {
       if (!ed.onCursor) return;
@@ -499,6 +539,8 @@ const CodeEditor = (() => {
     ta.addEventListener("scroll", sync);
     ta.addEventListener("keydown", onKey);
     ["keyup", "click", "select", "input"].forEach((ev) => ta.addEventListener(ev, cursor));
+    ["keyup", "mouseup", "touchend", "select", "selectionchange"].forEach((ev) => ta.addEventListener(ev, selSchedule));
+    document.addEventListener("selectionchange", () => { if (document.activeElement === ta) selSchedule(); });
     new ResizeObserver(sync).observe(ta);
 
     return Object.assign(ed, {

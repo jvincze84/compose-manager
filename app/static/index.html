@@ -134,6 +134,7 @@
     <footer class="logfoot">
       <span id="ed-state" class="muted"></span>
       <span id="ed-pos" class="muted ed-pos"></span>
+      <span id="ed-occ" class="muted ed-occ"></span>
       <select id="ed-mode" class="ed-mode" title="Syntax"></select>
       <label><input type="checkbox" id="ed-wrap"> Wrap</label>
       <span class="spacer"></span>
@@ -142,10 +143,43 @@
     </footer>
   </section>
 
+  <!-- Exec: shell in a container -->
+  <section id="termview" class="logview termview hidden" aria-hidden="true">
+    <header class="logbar">
+      <button id="term-close" class="icon-btn" aria-label="Close">←</button>
+      <div class="logtitle">
+        <strong id="term-title"></strong>
+        <span class="muted"><span id="term-project"></span> · <span id="term-state"></span></span>
+      </div>
+      <button id="term-reconnect" class="small-btn hidden" title="Open a new shell">⟳ Reconnect</button>
+      <button id="term-font-down" class="small-btn" title="Smaller font" aria-label="Smaller font">A−</button>
+      <button id="term-font-up" class="small-btn" title="Larger font" aria-label="Larger font">A+</button>
+    </header>
+    <div id="term"></div>
+    <footer id="term-keys" class="term-keys">
+      <button data-key="esc">Esc</button>
+      <button data-key="tab">Tab</button>
+      <button data-key="ctrl" title="Ctrl + next key">Ctrl</button>
+      <button data-key="ctrl-c" title="Ctrl+C">^C</button>
+      <button data-key="ctrl-d" title="Ctrl+D">^D</button>
+      <button data-key="left" aria-label="Left">←</button>
+      <button data-key="up" aria-label="Up">↑</button>
+      <button data-key="down" aria-label="Down">↓</button>
+      <button data-key="right" aria-label="Right">→</button>
+      <button data-key="pipe">|</button>
+      <button data-key="tilde">~</button>
+      <button data-key="slash">/</button>
+      <button data-key="dash">-</button>
+      <button data-key="paste" title="Paste from the clipboard">Paste</button>
+    </footer>
+  </section>
+
   <div id="toast" class="toast hidden"></div>
 
   <script src="editor.js"></script>
   <script src="app.js"></script>
   <script src="files.js"></script>
+  <script src="term.js"></script>
+  <script src="exec.js"></script>
 </body>
 </html>
