@@ -73,7 +73,8 @@ configuration and API.
     `project_container()` checks `CONTAINER_RE` and that the container's
     `com.docker.compose.project` label equals the project (via `docker inspect`,
     commands then use the container ID). `restart` = `docker restart`.
-  - Exec (shell): `POST …/containers/{c}/exec {cols, rows}` → `ExecSession` in
+  - Exec (shell): `POST …/containers/{c}/exec {cols, rows, shell, root}` (`EXEC_SHELLS`:
+    auto = bash if present else sh, bash, sh; `root` → `-u 0`) → `ExecSession` in
     `_exec_sessions` (max `EXEC_MAX_SESSIONS` = 8). `docker exec -it` runs on a
     `pty.openpty()` pair (the docker CLI is a session leader with the pty as
     controlling tty via `preexec_fn` → `TIOCSWINSZ` on the master delivers SIGWINCH
@@ -85,9 +86,11 @@ configuration and API.
     `EXEC_IDLE_SEC` (60) with no stream attached. **Killing `docker exec` does not
     stop the process in the container** (verified), so each shell gets
     `CM_EXEC=<random marker>` (not the session id) and `close()` runs `EXEC_KILL`
-    via `docker exec -u 0`: HUP, then KILL every process whose `/proc/*/environ`
-    has the marker. SSE + POST instead of WebSocket on purpose: the basic auth
-    middleware is HTTP-only, uvicorn would need `websockets`, proxies need no setup.
+    via `docker exec` **as the shell's user** (`-u 0` only for root shells: without
+    CAP_SYS_PTRACE even root can't read another uid's `/proc/*/environ` — verified):
+    HUP, then KILL every process whose environ has the marker. SSE + POST instead of
+    WebSocket on purpose: the basic auth middleware is HTTP-only, uvicorn would need
+    `websockets`, proxies need no setup.
   - Logs: SSE (`StreamingResponse`), JSON-encoded lines, `event: end` when the process
     exits, `: ping` keep-alive every 15 s; subprocess is killed on client disconnect.
   - Validation: project names `^[a-z0-9][a-z0-9_-]*$`, must exist in `compose ls`;
@@ -157,7 +160,13 @@ configuration and API.
     `history.state.exec`), SSE + ordered/coalesced input POSTs, resize debounce,
     key bar (`#term-keys`, pointerdown cancelled to keep the keyboard open; sticky
     Ctrl; Paste via `navigator.clipboard`), view sized to `visualViewport` (on-screen
-    keyboard), font size A−/A+ (localStorage `termFont`), `sendBeacon` close on pagehide.
+    keyboard), font size A−/A+ in the key bar (localStorage `termFont`), shell select +
+    root toggle in the header (`termShell`, `termRoot`; change = reconnect),
+    `sendBeacon` close on pagehide. Uses `jsonPost()` from `files.js`.
+  - **All scripts share one global scope** (classic `<script>`s): a top-level
+    `const`/`let`/`class` declared in two files is a SyntaxError that silently kills
+    the whole later file (happened with `jsonPost` → the exec button did nothing).
+    Check for duplicates and load all files into one `vm` context in node (stub DOM).
   - `sw.js`: network-first for the shell, never caches `/api/`.
     **Bump `CACHE` (`compose-manager-vN`) whenever static files change.**
 - `Dockerfile`: `python:3.13-slim` + docker CLI and compose plugin copied from `docker:cli`.
@@ -228,9 +237,8 @@ unless asked — tell them the command instead.
 
 ## Ideas / possible next steps
 
-Mentioned to the user, not requested yet: shell as root (`-u 0`) / shell picker,
-wide-character support in `term.js`, rename / delete / new folder in the file
-browser (deliberately not implemented: every change must stay restorable from
+Mentioned to the user, not requested yet: wide-character support in `term.js`,
+rename / delete / new folder in the file browser (deliberately not implemented: every change must stay restorable from
 backups — would need a trash / backup of deleted files first), editor tabs,
 `haproxy -c` / `named-checkconf` validation, Up/Down/edit for projects outside
 `COMPOSE_DIR` (e.g. `/docker-iac`).

@@ -518,3 +518,5 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .term-keys button.active { border-color: var(--blue); background: #1e2a4d; color: #93c5fd; }
 #term-reconnect { color: var(--green); }
+#term-root { font-family: ui-monospace, Menlo, Consolas, monospace; }
+#term-root.active { color: var(--red); border-color: var(--red); background: rgba(239, 68, 68, 0.12); }

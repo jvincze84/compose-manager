@@ -26,8 +26,9 @@ Docker socket.
   network and disk I/O, PIDs, published ports, compose file path
 - **Per-service details:** state, health, image, ports, CPU and memory bars;
   per container **↻ restart** (`docker restart`), **>_ shell** and **Log**
-- **Shell in a container** (`>_`): an interactive terminal (`docker exec -it`,
-  `bash` if the image has it, otherwise `sh`) in the browser — colours, `vi`,
+- **Shell in a container** (`>_`): an interactive terminal (`docker exec -it`;
+  auto = `bash` if the image has it, otherwise `sh`, or pick one; optionally
+  as **root**) in the browser — colours, `vi`,
   `top`, `less` work; key bar for phones (Esc, Tab, Ctrl, arrows, `|`, `~` …)
 - **Live logs** (Server-Sent Events) for a whole project or a single service,
   with tail size, follow and line-wrap options and error/warning highlighting
@@ -155,16 +156,20 @@ A full-screen editor with a **file browser** for the whole `COMPOSE_DIR`
 ### Shell in a container (`>_`)
 
 Each container row has a **>_** button (only for running containers). It opens
-a full-screen terminal running `docker exec -it <container> sh -c 'bash || sh'`
-on a pseudo-terminal inside the app (`TERM=xterm-256color`, the container's
-default user).
+a full-screen terminal running `docker exec -it <container> <shell>` on a
+pseudo-terminal inside the app (`TERM=xterm-256color`).
+
+- **Shell** (header): `auto` (bash if the image has it, otherwise sh),
+  `bash` or `sh`. **root** runs it as root (`docker exec -u 0`) instead of
+  the container's default user. Changing either opens a new shell; both are
+  remembered.
 
 - The terminal emulator is built in (no library, works offline): cursor
   movement, colours (16 / 256 / true colour), the alternate screen (`vi`,
   `less`, `top`, `htop`), line drawing, application cursor keys, bracketed
   paste. Wide (CJK / emoji) characters are treated as one column.
 - The size follows the window (`stty size` is kept up to date); **A− / A+**
-  changes the font size (remembered).
+  (key bar) changes the font size (remembered).
 - Phones: tap the terminal to bring up the keyboard; the key bar adds Esc,
   Tab, a sticky **Ctrl** (applies to the next key), ^C, ^D, arrows and a few
   symbols, and **Paste** (clipboard; needs HTTPS). Desktop: Ctrl+C copies
@@ -237,7 +242,7 @@ between that backup and the editor's current content.
 | `POST /api/fs/diff` | Unified diff of `{path, id}` backup vs. `{content}` |
 | `GET /api/projects/{name}/logs?tail=200&follow=true&service=` | Log stream (SSE) |
 | `POST /api/projects/{name}/containers/{container}/restart` | `docker restart` one container of the project |
-| `POST /api/projects/{name}/containers/{container}/exec` | Start a shell `{cols, rows}` → `{id}` (running containers only, 429 above 8 shells) |
+| `POST /api/projects/{name}/containers/{container}/exec` | Start a shell `{cols, rows, shell: auto\|bash\|sh, root}` → `{id}` (running containers only, 429 above 8 shells) |
 | `GET /api/exec/{id}/stream` | Terminal output (SSE, JSON strings); `event: end` with the exit code |
 | `POST /api/exec/{id}/input` | Keystrokes `{data}` |
 | `POST /api/exec/{id}/resize` | Terminal size `{cols, rows}` |

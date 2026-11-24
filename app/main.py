@@ -607,6 +607,7 @@ EXEC_SHELL = 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; 
 # Killing `docker exec` does not end the process in the container (dockerd keeps it
 # running), so every shell gets a CM_EXEC=<marker> env var; on close every process in
 # the container carrying it (the shell and its children) gets SIGHUP, then SIGKILL.
+# The killer runs as the shell's user (root can't read other uids' environ in docker).
 EXEC_KILL = ('k() { for p in /proc/[0-9]*; do '
              'if tr "\\0" "\\n" < "$p/environ" 2>/dev/null | grep -qx "CM_EXEC=$1"; then '
              'kill -$2 "${p#/proc/}" 2>/dev/null; fi; done; }; k "$1" HUP; sleep 1; k "$1" KILL')
@@ -614,8 +615,9 @@ _bg_tasks: set[asyncio.Task] = set()
 
 
 class ExecSession:
-    def __init__(self, sid: str, container: dict, proc, fd: int, marker: str):
+    def __init__(self, sid: str, container: dict, proc, fd: int, marker: str, root: bool):
         self.id, self.container, self.proc, self.fd, self.marker = sid, container, proc, fd, marker
+        self.root = root
         self.q: asyncio.Queue = asyncio.Queue()
         self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.attached = 0
@@ -699,9 +701,11 @@ class ExecSession:
                 self.proc.kill()
             except ProcessLookupError:
                 pass
+            # as the shell's user: without CAP_SYS_PTRACE even root can't read the
+            # /proc/*/environ of another uid's processes
             task = asyncio.create_task(run(
-                "docker", "exec", "-u", "0", self.container["id"], "sh", "-c", EXEC_KILL, "sh", self.marker,
-                timeout=30))
+                "docker", "exec", *(["-u", "0"] if self.root else []), self.container["id"],
+                "sh", "-c", EXEC_KILL, "sh", self.marker, timeout=30))
             _bg_tasks.add(task)
             task.add_done_callback(_bg_tasks.discard)
         try:
@@ -720,9 +724,21 @@ def _set_ctty():  # runs in the child: the pty becomes its controlling terminal 
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
 
-class ExecStart(BaseModel):
+class ExecSize(BaseModel):
     cols: int = 80
     rows: int = 24
+
+
+EXEC_SHELLS = {  # shell -> command run in the container
+    "auto": ["sh", "-c", EXEC_SHELL],  # bash if the image has it, else sh
+    "bash": ["bash"],
+    "sh": ["sh"],
+}
+
+
+class ExecStart(ExecSize):
+    shell: str = "auto"
+    root: bool = False  # docker exec -u 0 instead of the container's default user
 
 
 class ExecInput(BaseModel):
@@ -734,6 +750,8 @@ async def api_exec_start(name: str, container: str, body: ExecStart):
     c = await project_container(name, container)
     if c["status"] != "running":
         raise HTTPException(400, "The container is not running")
+    if body.shell not in EXEC_SHELLS:
+        raise HTTPException(400, "Unknown shell")
     if len(_exec_sessions) >= EXEC_MAX_SESSIONS:
         raise HTTPException(429, "Too many open shells")
     cols, rows = max(10, min(body.cols, 500)), max(4, min(body.rows, 200))
@@ -743,8 +761,8 @@ async def api_exec_start(name: str, container: str, body: ExecStart):
     os.set_blocking(master, False)
     try:
         proc = await asyncio.create_subprocess_exec(
-            "docker", "exec", "-it", "--detach-keys", "ctrl-^,ctrl-@",
-            "-e", "TERM=xterm-256color", "-e", f"CM_EXEC={marker}", c["id"], "sh", "-c", EXEC_SHELL,
+            "docker", "exec", "-it", "--detach-keys", "ctrl-^,ctrl-@", *(["-u", "0"] if body.root else []),
+            "-e", "TERM=xterm-256color", "-e", f"CM_EXEC={marker}", c["id"], *EXEC_SHELLS[body.shell],
             stdin=slave, stdout=slave, stderr=slave,
             start_new_session=True, preexec_fn=_set_ctty,
         )
@@ -754,8 +772,8 @@ async def api_exec_start(name: str, container: str, body: ExecStart):
     finally:
         os.close(slave)
     sid = secrets.token_urlsafe(18)
-    _exec_sessions[sid] = ExecSession(sid, c, proc, master, marker)
-    return {"id": sid, "container": c["name"]}
+    _exec_sessions[sid] = ExecSession(sid, c, proc, master, marker, body.root)
+    return {"id": sid, "container": c["name"], "shell": body.shell, "root": body.root}
 
 
 def exec_session(sid: str) -> ExecSession:
@@ -814,7 +832,7 @@ async def api_exec_input(sid: str, body: ExecInput):
 
 
 @app.post("/api/exec/{sid}/resize")
-async def api_exec_resize(sid: str, body: ExecStart):
+async def api_exec_resize(sid: str, body: ExecSize):
     exec_session(sid).resize(max(10, min(body.cols, 500)), max(4, min(body.rows, 200)))
     return {"ok": True}
 

@@ -8,6 +8,8 @@ const ex = {
   out: "", sending: false, resizeTimer: 0,
 };
 const TERM_FONT_KEY = "termFont";
+const TERM_SHELL_KEY = "termShell";  // auto | bash | sh
+const TERM_ROOT_KEY = "termRoot";    // "1" = docker exec -u 0
 const TERM_FONTS = [11, 12, 13, 14, 15, 16, 18];
 
 function execTerm() {
@@ -27,7 +29,7 @@ function execTerm() {
   return ex.term;
 }
 
-const jsonPost = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+// jsonPost() comes from files.js (all scripts share one global scope: never redeclare!)
 
 function execState(text) { $("#term-state").textContent = text; }
 
@@ -57,7 +59,7 @@ async function execConnect() {
   let r;
   try {
     r = await api(`api/projects/${encodeURIComponent(ex.project)}/containers/${encodeURIComponent(ex.container)}/exec`,
-      jsonPost({ cols: term.cols, rows: term.rows }));
+      jsonPost({ cols: term.cols, rows: term.rows, shell: $("#term-shell").value, root: execRoot() }));
   } catch (e) {
     term.write(`\x1b[31m${e.message}\x1b[0m\r\n`);
     execState("error");
@@ -65,6 +67,7 @@ async function execConnect() {
     return;
   }
   ex.sid = r.id;
+  $("#term-title").textContent = `${r.container}${r.root ? " (root)" : ""}`;
   const es = new EventSource(`api/exec/${r.id}/stream`);
   ex.es = es;
   es.onopen = () => execState("connected");
@@ -153,6 +156,7 @@ $("#term-keys").addEventListener("click", (e) => {
   if (!b || !ex.term) return;
   const k = b.dataset.key;
   if (k === "ctrl") ex.term.setCtrl(!ex.term.ctrlOnce);
+  else if (k === "font-down" || k === "font-up") execFont(k === "font-up" ? 1 : -1);
   else if (k === "paste") {
     // needs a secure context (HTTPS / localhost) and the user's permission
     navigator.clipboard?.readText().then((t) => { if (t) ex.term.paste(t); })
@@ -175,10 +179,24 @@ function execFont(step) {
   requestAnimationFrame(() => term.fit());
 }
 
+const execRoot = () => $("#term-root").getAttribute("aria-pressed") === "true";
+function execSetRoot(on) {
+  $("#term-root").setAttribute("aria-pressed", String(on));
+  $("#term-root").classList.toggle("active", on);
+}
+$("#term-shell").value = localStorage.getItem(TERM_SHELL_KEY) || "auto";
+execSetRoot(localStorage.getItem(TERM_ROOT_KEY) === "1");
+$("#term-shell").addEventListener("change", (e) => {
+  localStorage.setItem(TERM_SHELL_KEY, e.target.value);
+  execConnect();
+});
+$("#term-root").addEventListener("click", () => {
+  execSetRoot(!execRoot());
+  localStorage.setItem(TERM_ROOT_KEY, execRoot() ? "1" : "");
+  execConnect();
+});
 $("#term-close").addEventListener("click", () => closeExec());
 $("#term-reconnect").addEventListener("click", () => execConnect());
-$("#term-font-down").addEventListener("click", () => execFont(-1));
-$("#term-font-up").addEventListener("click", () => execFont(1));
 // closing the tab / app: end the shell right away (otherwise after EXEC_IDLE_SEC)
 window.addEventListener("pagehide", () => {
   if (ex.sid) navigator.sendBeacon(`api/exec/${ex.sid}/close`);

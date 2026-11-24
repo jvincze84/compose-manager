@@ -151,9 +151,11 @@
         <strong id="term-title"></strong>
         <span class="muted"><span id="term-project"></span> · <span id="term-state"></span></span>
       </div>
-      <button id="term-reconnect" class="small-btn hidden" title="Open a new shell">⟳ Reconnect</button>
-      <button id="term-font-down" class="small-btn" title="Smaller font" aria-label="Smaller font">A−</button>
-      <button id="term-font-up" class="small-btn" title="Larger font" aria-label="Larger font">A+</button>
+      <button id="term-reconnect" class="small-btn hidden" title="Open a new shell">⟳</button>
+      <select id="term-shell" title="Shell (changing it opens a new shell)">
+        <option value="auto">auto</option><option value="bash">bash</option><option value="sh">sh</option>
+      </select>
+      <button id="term-root" class="small-btn" aria-pressed="false" title="Run the shell as root (docker exec -u 0); opens a new shell">root</button>
     </header>
     <div id="term"></div>
     <footer id="term-keys" class="term-keys">
@@ -171,6 +173,8 @@
       <button data-key="slash">/</button>
       <button data-key="dash">-</button>
       <button data-key="paste" title="Paste from the clipboard">Paste</button>
+      <button data-key="font-down" title="Smaller font" aria-label="Smaller font">A−</button>
+      <button data-key="font-up" title="Larger font" aria-label="Larger font">A+</button>
     </footer>
   </section>
 
