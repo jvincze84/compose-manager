@@ -62,7 +62,13 @@ configuration and API.
     `POST /api/fs/new {dir, name}`: plain name only, whitelisted types only, `O_EXCL`
     (never overwrites; a symlink with that name is refused), chowned to the parent
     dir's owner; a top-level `docker-compose-*.yaml` gets `NEW_FILE_TEMPLATES["compose"]`.
-    No rename / delete on purpose (every change must stay restorable from backups).
+    `POST /api/fs/duplicate {path, name}`: same rules as new (whitelisted name, `O_EXCL`),
+    copies content + mode + owner. `POST /api/fs/delete {path, recursive}`: **moves** the
+    file / dir (symlink = only the link) to `.compose-manager-backup/.trash/<id>/<rel>`
+    (`os.rename`, never a real delete; EXDEV → 409); non-empty dir without `recursive` →
+    409 `{nonEmpty, count}` and the UI asks again; root and mount points refused. No
+    restore endpoint and no pruning of the trash (undo = `mv` on the host). UI: tree
+    buttons act on the open file / current dir (`treeToolsUpdate()`). No rename on purpose.
   - Backups: `COMPOSE_DIR/.compose-manager-backup/<rel path>.<id>`; `<file>.original`
     = content before the first save (or the oldest pre-existing timestamped backup
     is renamed to it) and is **never pruned**; `<file>.<%Y%m%d-%H%M%S-%f>` before
@@ -120,6 +126,18 @@ configuration and API.
     `openEditor(project, file)` (card button; stack files in the `#ed-file` quick
     select). Back button / `popstate` → `editorPopstate()` (closes tree first on
     phones); unsaved changes are confirmed.
+    **Tabs**: `ed.tabs` (`{path, info, hash, orig, text, eol, backup, scroll/selection, mode,
+    indent, out}`), `ed.tab` = active. The existing `ed.path/info/hash/orig/eol/backup` +
+    the textarea are the LIVE state of the active tab (so the other code stays unchanged):
+    `tabSnapshot()` copies it into the tab object, `tabLoad(t)` restores a tab,
+    `tabActivate` = snapshot + load, `tabClose(t, force)` (confirm if `tabDirty`; neighbour
+    becomes active; none left → `edEmpty()`). `edOpen(path, quiet, activate)` reuses an open
+    tab; `ed.busy` blocks switching/closing (an async save must land in its own tab).
+    `edOutput` stores the output per tab (`t.out`). Dirty = `tabDirty(t)` / `anyDirty()`
+    (leave / popstate / beforeunload use it). Closing the editor drops all tabs but
+    `tabsPersist()` keeps `edTabs` + `edFile` in localStorage (restored on wide screens).
+    Deleting a path closes its tabs. Undo history is NOT kept across tab switches (the
+    textarea value is replaced). `edDiscard()` (↩ button) reloads the file from disk.
   - `editor.js`: `CodeEditor` — dependency-free code editor: transparent `<textarea>`
     over a highlighted `<pre>` + line-number gutter, synced by `transform` on scroll.
     Modes (`modeFor(filename)`, overridable in the footer): yaml, json, env, haproxy,
@@ -252,7 +270,6 @@ unless asked — tell them the command instead.
 ## Ideas / possible next steps
 
 Mentioned to the user, not requested yet: wide-character support in `term.js`,
-rename / delete / new folder in the file browser (deliberately not implemented: every change must stay restorable from
-backups — would need a trash / backup of deleted files first), editor tabs,
+rename / new folder in the file browser, UI to browse / restore / empty the trash, editor tabs,
 `haproxy -c` / `named-checkconf` validation, Up/Down/edit for projects outside
 `COMPOSE_DIR` (e.g. `/docker-iac`).

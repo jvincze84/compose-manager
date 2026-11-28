@@ -150,12 +150,28 @@ A full-screen editor with a **file browser** for the whole `COMPOSE_DIR`
   JSON parse for `.json`. Errors mark and jump to the offending line. Saving
   runs the same check and asks before writing an invalid file. A concurrent
   change on disk is detected (HTTP 409).
+- **Tabs**: opening a file from the browser (or the project quick select) opens
+  it in a new tab; opening an already open file just switches to it. Each tab
+  keeps its own unsaved text, scroll position, cursor, syntax mode and output.
+  A ● marks tabs with unsaved changes, ✕ (or a middle click) closes a tab and
+  asks first if it has changes. Leaving the editor with unsaved tabs asks once.
+  The open tabs are reopened next time on wide screens. Note: the undo history
+  (Ctrl+Z) is per switch — it starts fresh when you come back to a tab.
+- **↩ Discard** (next to Save) throws the unsaved changes away and reloads the
+  file from disk (so it also resolves the "file changed on disk" conflict).
 - **Save + Up** appears for files used by a stack.
 - **＋ New file** creates an empty file in the current directory. Only
   whitelisted file types can be created and existing files are never
   overwritten. A new top-level `docker-compose-<key>.yaml` starts from a small
   `services:` template and immediately shows up as a project (Up to start it).
   The new file gets the owner of its directory.
+- **⧉ Duplicate** copies the open file under a new name in the same directory
+  (same owner and permissions, never overwrites; the new name must be an
+  editable type).
+- **🗑 File** / **🗑 Dir** delete the open file / the current directory after a
+  confirmation (a non-empty directory asks a second time). Nothing is erased:
+  the item is *moved* to `<COMPOSE_DIR>/.compose-manager-backup/.trash/<timestamp>/<path>`
+  (root-only). To undo, move it back on the host. The trash is never pruned.
 - Files are rewritten in place, so owner and permissions are preserved.
 
 ### Shell in a container (`>_`)
@@ -239,6 +255,8 @@ between that backup and the editor's current content.
 | `POST /api/projects/{name}/pull` | pull → down → up; NDJSON stream of `{"step"}`, `{"line"}`, final `{"done", "ok"}` (409 if already running) |
 | `GET /api/fs/list?path=` | Directory listing (paths are relative to `COMPOSE_DIR`), `editable` per entry |
 | `GET /api/fs/file?path=` | File content + `hash`, `editable`, `binary`, `eol`, `stacks` using it |
+| `POST /api/fs/duplicate` | Copy `{path, name}` in the same directory |
+| `POST /api/fs/delete` | `{path, recursive}`: move to the trash (409 `nonEmpty` for a directory without `recursive`) |
 | `POST /api/fs/new` | Create `{dir, name}` (whitelisted types only; 409 if it exists) |
 | `PUT /api/fs/file` | Save `{path, content, hash, force, eol}`; 422 if validation fails, 409 on conflict, 403 if not whitelisted |
 | `POST /api/fs/validate` | Validate `{path, content}` without saving (`ok`, `checked`, `output`, `line`) |

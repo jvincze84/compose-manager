@@ -72,6 +72,7 @@
       </div>
       <button id="ed-find-btn" class="icon-btn" title="Find / replace (Ctrl+F, Ctrl+H)" aria-label="Find" disabled>🔍</button>
       <button id="ed-history" class="icon-btn" title="Previous versions (backups)" aria-label="Previous versions" disabled>🕘</button>
+      <button id="ed-discard" class="small-btn" title="Discard the unsaved changes (reloads the file from disk)" disabled>↩<span class="lbl"> Discard</span></button>
       <button id="ed-save" class="small-btn save-btn" disabled>Save</button>
     </header>
     <div class="ed-main">
@@ -83,11 +84,17 @@
             <button id="tree-new" class="small-btn" title="New file in this directory">＋ New file</button>
             <button id="tree-refresh" class="small-btn" title="Refresh">⟳</button>
           </div>
+          <div class="tree-tools tree-acts">
+            <button id="tree-dup" class="small-btn" title="Duplicate the open file" disabled>⧉ Duplicate</button>
+            <button id="tree-del" class="small-btn danger" title="Delete the open file (moved to the trash)" disabled>🗑 File</button>
+            <button id="tree-deldir" class="small-btn danger" title="Delete this directory (moved to the trash)" disabled>🗑 Dir</button>
+          </div>
         </div>
         <div id="tree-list" class="tree-list"></div>
         <label class="tree-foot muted"><input type="checkbox" id="tree-only-edit"> editable files only</label>
       </aside>
       <div class="ed-pane">
+        <div id="ed-tabs" class="ed-tabs hidden" role="tablist"></div>
         <div id="ed-backups" class="backups hidden">
           <div class="backups-head">
             <strong>Previous versions</strong>

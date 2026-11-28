@@ -1,5 +1,5 @@
 // Simple service worker: caches the app shell, never the API.
-const CACHE = "compose-manager-v20";
+const CACHE = "compose-manager-v22";
 const SHELL = ["./", "index.html", "style.css", "app.js", "editor.js", "files.js", "term.js", "exec.js", "manifest.webmanifest",
   "icon.svg", "icon-192.png", "icon-512.png"];
 
