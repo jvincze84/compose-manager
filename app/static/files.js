@@ -130,8 +130,21 @@ function tabsRender() {
     const label = dup && parts.length > 1 ? `${parts[parts.length - 2]}/${names[i]}` : names[i];
     return `<div class="etab ${t === ed.tab ? "active" : ""} ${tabDirty(t) ? "dirty" : ""}" role="tab" data-tab="${i}" title="${esc(t.path)}">
       <span class="en">${esc(label)}</span><button class="ex" data-close="${i}" title="Close tab" aria-label="Close tab">✕</button></div>`;
-  }).join("");
+  }).join("") + `<button class="etabs-all" data-closeall title="Close all tabs without unsaved changes">Close all</button>`;
   bar.querySelector(".etab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+// "Close all": only the tabs without unsaved changes; modified ones stay open
+function tabsCloseClean() {
+  const clean = ed.tabs.filter((t) => !tabDirty(t));
+  if (!clean.length) return toast("No tab without unsaved changes");
+  if (clean.includes(ed.tab)) {  // land on a modified tab instead of one that is about to close
+    const keep = ed.tabs.find(tabDirty);
+    if (keep) tabActivate(keep);
+  }
+  clean.forEach((t) => tabClose(t, true));
+  const left = ed.tabs.length;
+  if (left) toast(`${clean.length} closed, ${left} with unsaved changes left open`);
 }
 
 function tabsPersist() {
@@ -722,6 +735,7 @@ $("#ed-save").addEventListener("click", () => edSave());
 $("#ed-discard").addEventListener("click", edDiscard);
 $("#ed-tabs").addEventListener("click", (e) => {
   if (ed.busy) return;
+  if (e.target.closest("[data-closeall]")) return tabsCloseClean();
   const x = e.target.closest("[data-close]");
   if (x) return tabClose(ed.tabs[+x.dataset.close]);
   const t = e.target.closest("[data-tab]");

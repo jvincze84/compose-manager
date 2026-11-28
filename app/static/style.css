@@ -548,3 +548,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #ed-discard:not(:disabled) { color: #fbbf24; }
 #ed-discard:disabled { opacity: 0.4; }
 @media (max-width: 520px) { #ed-discard .lbl { display: none; } }
+.etabs-all {
+  flex: none; position: sticky; right: 0; margin-left: auto; padding: 0 12px; border: 0;
+  border-left: 1px solid var(--border); background: var(--card); color: var(--muted); font-size: 0.8rem;
+}
+.etabs-all:hover { color: var(--text); background: var(--card2); }

@@ -136,7 +136,8 @@ configuration and API.
     `edOutput` stores the output per tab (`t.out`). Dirty = `tabDirty(t)` / `anyDirty()`
     (leave / popstate / beforeunload use it). Closing the editor drops all tabs but
     `tabsPersist()` keeps `edTabs` + `edFile` in localStorage (restored on wide screens).
-    Deleting a path closes its tabs. Undo history is NOT kept across tab switches (the
+    "Close all" (`tabsCloseClean()`, sticky button inside `#ed-tabs`) closes only non-dirty
+    tabs, activating a dirty one first. Deleting a path closes its tabs. Undo history is NOT kept across tab switches (the
     textarea value is replaced). `edDiscard()` (↩ button) reloads the file from disk.
   - `editor.js`: `CodeEditor` — dependency-free code editor: transparent `<textarea>`
     over a highlighted `<pre>` + line-number gutter, synced by `transform` on scroll.
@@ -270,6 +271,6 @@ unless asked — tell them the command instead.
 ## Ideas / possible next steps
 
 Mentioned to the user, not requested yet: wide-character support in `term.js`,
-rename / new folder in the file browser, UI to browse / restore / empty the trash, editor tabs,
+rename / new folder in the file browser, UI to browse / restore / empty the trash,
 `haproxy -c` / `named-checkconf` validation, Up/Down/edit for projects outside
 `COMPOSE_DIR` (e.g. `/docker-iac`).

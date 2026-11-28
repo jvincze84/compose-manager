@@ -154,7 +154,8 @@ A full-screen editor with a **file browser** for the whole `COMPOSE_DIR`
   it in a new tab; opening an already open file just switches to it. Each tab
   keeps its own unsaved text, scroll position, cursor, syntax mode and output.
   A ● marks tabs with unsaved changes, ✕ (or a middle click) closes a tab and
-  asks first if it has changes. Leaving the editor with unsaved tabs asks once.
+  asks first if it has changes. **Close all** (right end of the tab bar) closes
+  only the tabs without unsaved changes; modified ones stay open. Leaving the editor with unsaved tabs asks once.
   The open tabs are reopened next time on wide screens. Note: the undo history
   (Ctrl+Z) is per switch — it starts fresh when you come back to a tab.
 - **↩ Discard** (next to Save) throws the unsaved changes away and reloads the
