@@ -110,6 +110,8 @@ configuration and API.
     `starting` / `problem` are hidden while empty, the file filters while no stacks exist.
     The editor UI lives in `files.js` (loaded after `app.js`, uses its globals).
     Action output (card and editor) = `.outbox`: collapsible (▾) and closable (✕).
+    Log view: font-size slider (`#log-font`, localStorage `logFont`, CSS var `--log-size`) and
+    ⭳ Download (client-side Blob of the lines currently loaded, max `log.MAX`).
     Container rows: ↻ (`crestart`, `state.busyCtr`), `>_` (`exec`, running only), Log.
   - `files.js`: editor overlay (`#editor`, global `ed` object) = file browser
     (`#ed-tree`: side panel ≥ 900 px, overlay on phones) + code editor + backups panel
@@ -172,7 +174,7 @@ configuration and API.
     `history.state.exec`), SSE + ordered/coalesced input POSTs, resize debounce,
     key bar (`#term-keys`, pointerdown cancelled to keep the keyboard open; sticky
     Ctrl; Paste via `navigator.clipboard`), view sized to `visualViewport` (on-screen
-    keyboard), font size A−/A+ in the key bar (localStorage `termFont`), shell select +
+    keyboard), font size A−/A+ in the header (localStorage `termFont`), shell select +
     root toggle in the header (`termShell`, `termRoot`; change = reconnect),
     `sendBeacon` close on pagehide. Uses `jsonPost()` from `files.js`.
   - **All scripts share one global scope** (classic `<script>`s): a top-level

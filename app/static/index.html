@@ -54,6 +54,8 @@
       <label><input type="checkbox" id="log-follow" checked> Follow</label>
       <label><input type="checkbox" id="log-wrap" checked> Wrap</label>
       <span id="log-state" class="muted"></span>
+      <label class="fsz" title="Font size"><span aria-hidden="true">A</span><input type="range" id="log-font" min="9" max="22" step="1" value="12" aria-label="Font size"><span aria-hidden="true" class="big">A</span></label>
+      <button id="log-download" class="small-btn" title="Download the loaded log lines as a text file">⭳ Download</button>
       <button id="log-bottom" class="small-btn">↓ Bottom</button>
     </footer>
   </section>
@@ -152,6 +154,8 @@
         <span class="muted"><span id="term-project"></span> · <span id="term-state"></span></span>
       </div>
       <button id="term-reconnect" class="small-btn hidden" title="Open a new shell">⟳</button>
+      <button id="term-font-down" class="small-btn" title="Smaller font" aria-label="Smaller font">A−</button>
+      <button id="term-font-up" class="small-btn" title="Larger font" aria-label="Larger font">A+</button>
       <select id="term-shell" title="Shell (changing it opens a new shell)">
         <option value="auto">auto</option><option value="bash">bash</option><option value="sh">sh</option>
       </select>
@@ -173,8 +177,6 @@
       <button data-key="slash">/</button>
       <button data-key="dash">-</button>
       <button data-key="paste" title="Paste from the clipboard">Paste</button>
-      <button data-key="font-down" title="Smaller font" aria-label="Smaller font">A−</button>
-      <button data-key="font-up" title="Larger font" aria-label="Larger font">A+</button>
     </footer>
   </section>
 

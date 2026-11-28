@@ -151,9 +151,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .logoutput {
   flex: 1; margin: 0; padding: 10px 12px; overflow: auto;
-  font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; color: #cbd5e1;
+  font: var(--log-size, 12px)/1.4 ui-monospace, Menlo, Consolas, monospace; color: #cbd5e1;
   -webkit-overflow-scrolling: touch;
 }
+.fsz { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 0.8rem; }
+.fsz .big { font-size: 1.15rem; }
+.fsz input { width: 110px; accent-color: var(--blue); }
 .logoutput.wrap { white-space: pre-wrap; word-break: break-all; }
 .logoutput .lp { color: #60a5fa; }
 .logoutput .le { color: #f87171; }
