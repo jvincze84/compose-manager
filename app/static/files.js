@@ -7,7 +7,12 @@
 
 const ed = {
   project: null,  // stack project (opened from a card) or null
-  path: null,     // open file (relative to COMPOSE_DIR)
+  // Tabs: ed.tabs = open files, ed.tab = the active one. The fields below are the LIVE state of
+  // the active tab; on a switch tabSnapshot() copies them (+ text, scroll, selection) into the tab
+  // object and tabLoad() restores another. (The textarea's native undo history is not kept.)
+  tabs: [],
+  tab: null,
+  path: null,     // active file (relative to COMPOSE_DIR)
   info: null,     // /api/fs/file response
   hash: "", orig: "", eol: "lf",
   busy: false,
@@ -38,6 +43,10 @@ $("#ed-occ").addEventListener("click", () => cm.multiEdit());
 const WIDE = window.matchMedia("(min-width: 900px)");
 const qs = (o) => new URLSearchParams(o).toString();
 const edDirty = () => ed.path !== null && !!ed.info?.editable && edText.value !== ed.orig;
+// any tab (the active one is read live)
+const tabDirty = (t) => (t === ed.tab ? edDirty() : !!t.info?.editable && t.text !== t.orig);
+const anyDirty = () => ed.tabs.some(tabDirty);
+const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
 
 $("#ed-mode").innerHTML = Object.entries(CodeEditor.MODES)
   .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
@@ -61,10 +70,13 @@ function edUpdate() {
     : ed.backup && dirty ? "🕘 previous version – not saved" : dirty ? "● modified" : "saved";
   $("#ed-state").classList.toggle("dirty", dirty);
   $("#ed-save").disabled = ed.busy || ro || !dirty;
+  $("#ed-discard").disabled = ed.busy || ro || !(dirty || ed.backup);
+  tabsRender();
   $("#ed-check").disabled = ed.busy || !ed.path || ro;
   $("#ed-history").disabled = !ed.path;
   $("#ed-find-btn").disabled = !ed.path;
   findRepAvailable();
+  treeToolsUpdate();
   const stacks = ed.info?.stacks || [];
   $("#ed-save-up").classList.toggle("hidden", !stacks.length || ro);
   $("#ed-save-up").disabled = ed.busy;
@@ -91,6 +103,115 @@ function edOutput(text, kind = "", title = "", line = 0) {
   o.querySelector("[data-out=toggle]").textContent = "▾";
   cm.setError(line);
   o.dataset.line = line || "";
+  if (ed.tab) ed.tab.out = text ? [text, kind, title, line] : null;  // restored when the tab is activated again
+}
+
+// the standing notice for files that cannot be edited
+function infoNotice(r) {
+  if (r.binary) return ["Binary file – cannot be displayed.", "", "🔒 Binary"];
+  if (r.tooLarge) return [`The file is too large (${fmtBytes(r.size)}) to display.`, "", "🔒 Too large"];
+  if (r.encodingError) return ["The file is not UTF-8 encoded – read-only.", "", "🔒 Encoding"];
+  if (!r.editable) return ["This file type is not editable by configuration (EDIT_EXTENSIONS / EDIT_FILENAMES) – read-only.", "", "🔒 Read-only"];
+  return null;
+}
+
+// ------------------------------------------------------------------ tabs
+let tabsSig = "";
+function tabsRender() {
+  const bar = $("#ed-tabs");
+  const names = ed.tabs.map((t) => baseName(t.path));
+  const sig = ed.tabs.map((t, i) => `${t.path}|${t === ed.tab ? 1 : 0}${tabDirty(t) ? 1 : 0}`).join(";");
+  if (sig === tabsSig) return;
+  tabsSig = sig;
+  bar.classList.toggle("hidden", !ed.tabs.length);
+  bar.innerHTML = ed.tabs.map((t, i) => {
+    const dup = names.filter((n) => n === names[i]).length > 1;  // same name in different dirs -> show the parent dir
+    const parts = t.path.split("/");
+    const label = dup && parts.length > 1 ? `${parts[parts.length - 2]}/${names[i]}` : names[i];
+    return `<div class="etab ${t === ed.tab ? "active" : ""} ${tabDirty(t) ? "dirty" : ""}" role="tab" data-tab="${i}" title="${esc(t.path)}">
+      <span class="en">${esc(label)}</span><button class="ex" data-close="${i}" title="Close tab" aria-label="Close tab">✕</button></div>`;
+  }).join("") + `<button class="etabs-all" data-closeall title="Close all tabs without unsaved changes">Close all</button>`;
+  bar.querySelector(".etab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+// "Close all": only the tabs without unsaved changes; modified ones stay open
+function tabsCloseClean() {
+  const clean = ed.tabs.filter((t) => !tabDirty(t));
+  if (!clean.length) return toast("No tab without unsaved changes");
+  if (clean.includes(ed.tab)) {  // land on a modified tab instead of one that is about to close
+    const keep = ed.tabs.find(tabDirty);
+    if (keep) tabActivate(keep);
+  }
+  clean.forEach((t) => tabClose(t, true));
+  const left = ed.tabs.length;
+  if (left) toast(`${clean.length} closed, ${left} with unsaved changes left open`);
+}
+
+function tabsPersist() {
+  localStorage.setItem("edTabs", JSON.stringify(ed.tabs.map((t) => t.path)));
+  localStorage.setItem("edFile", ed.path || "");
+}
+
+// live state of the active tab -> its tab object
+function tabSnapshot() {
+  const t = ed.tab;
+  if (!t) return;
+  Object.assign(t, {
+    info: ed.info, hash: ed.hash, orig: ed.orig, eol: ed.eol, backup: ed.backup,
+    text: edText.value, st: edText.scrollTop, sl: edText.scrollLeft,
+    ss: edText.selectionStart, se: edText.selectionEnd,
+    mode: $("#ed-mode").value, indent: cm.indent,
+  });
+}
+
+// make t the active tab (its state becomes the live state)
+function tabLoad(t) {
+  ed.tab = t; ed.path = t.path; ed.info = t.info; ed.hash = t.hash; ed.orig = t.orig; ed.eol = t.eol; ed.backup = t.backup;
+  $("#ed-empty").classList.add("hidden");
+  $("#ed-code").classList.remove("hidden");
+  $("#ed-backups").classList.add("hidden");
+  $("#ed-path").textContent = t.info.abs;
+  $("#ed-path").title = t.info.abs;
+  if ([...$("#ed-file").options].some((o) => o.value === t.path)) $("#ed-file").value = t.path;
+  const mode = t.mode || CodeEditor.modeFor(baseName(t.path));
+  $("#ed-mode").value = mode;
+  cm.setMode(mode);
+  cm.setIndent(t.indent || CodeEditor.detectIndent(t.text, mode));
+  cm.setReadOnly(!t.info.editable);
+  edText.value = t.text;
+  cm.setError(0);
+  cm.refresh();
+  edText.scrollTop = t.st || 0; edText.scrollLeft = t.sl || 0;
+  try { edText.setSelectionRange(t.ss || 0, t.se || 0); } catch { /* ignore */ }
+  const out = t.out || infoNotice(t.info);
+  edOutput(...(out || [""]));
+  if (findIsOpen()) findRun();
+  tabsPersist();
+  treeRender();
+  edUpdate();
+}
+
+function tabActivate(t) {
+  if (t === ed.tab) return;
+  tabSnapshot();
+  tabLoad(t);
+}
+
+function tabClose(t, force = false) {
+  if (!force && tabDirty(t) && !confirm(`Discard the unsaved changes in ${baseName(t.path)}?`)) return false;
+  const i = ed.tabs.indexOf(t);
+  const wasActive = t === ed.tab;
+  ed.tabs.splice(i, 1);
+  if (wasActive) {
+    ed.tab = null;  // nothing to snapshot
+    const next = ed.tabs[i] || ed.tabs[i - 1];
+    if (next) tabLoad(next);
+    else edEmpty();
+  }
+  tabsPersist();
+  tabsRender();
+  treeRender();
+  return true;
 }
 
 // ------------------------------------------------------------------ open / close
@@ -110,9 +231,16 @@ async function openFileEditor() {
   showEditor();
   treeShow(true);
   await treeLoad(ed.dir);
-  const last = localStorage.getItem("edFile");
-  if (!ed.path && last && WIDE.matches) edOpen(last, true);
-  else if (!ed.path) edEmpty();
+  if (ed.tab) return;
+  if (WIDE.matches) {  // reopen the tabs of last time (on phones the file list is shown instead)
+    const last = localStorage.getItem("edFile");
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem("edTabs") || "[]"); } catch { /* ignore */ }
+    if (last && !saved.includes(last)) saved.push(last);
+    for (const p of saved) await edOpen(p, true, p === last);
+    if (!ed.tab && ed.tabs.length) tabActivate(ed.tabs[0]);
+  }
+  if (!ed.tab) edEmpty();
 }
 
 // card "Edit" button: the project's files in the quick select, browser available too
@@ -132,7 +260,7 @@ async function openEditor(name, file) {
 }
 
 function edEmpty() {
-  ed.path = null; ed.info = null;
+  ed.tab = null; ed.path = null; ed.info = null;
   $("#ed-empty").classList.remove("hidden");
   $("#ed-code").classList.add("hidden");
   $("#ed-path").textContent = "";
@@ -141,49 +269,37 @@ function edEmpty() {
   edUpdate();
 }
 
-async function edOpen(path, quiet = false) {
-  if (edDirty() && !confirm("Unsaved changes – discard them?")) {
-    $("#ed-file").value = ed.path || "";
+// open a file in a tab (an already open file is just activated); activate=false loads it in the background
+async function edOpen(path, quiet = false, activate = true) {
+  if (ed.busy) return;
+  const have = ed.tabs.find((t) => t.path === path);
+  if (have) {
+    if (activate) { tabActivate(have); if (!WIDE.matches) treeShow(false); }
     return;
   }
   ed.busy = true; edUpdate();
   try {
     const r = await api(`api/fs/file?${qs({ path })}`);
-    ed.path = r.path; ed.info = r; ed.hash = r.hash; ed.orig = r.content; ed.eol = r.eol; ed.backup = null;
-    localStorage.setItem("edFile", r.path);
-    $("#ed-empty").classList.add("hidden");
-    $("#ed-code").classList.remove("hidden");
-    $("#ed-backups").classList.add("hidden");
-    $("#ed-path").textContent = r.abs;
-    $("#ed-path").title = r.abs;
-    if ([...$("#ed-file").options].some((o) => o.value === r.path)) $("#ed-file").value = r.path;
-    const name = r.path.split("/").pop();
-    const mode = CodeEditor.modeFor(name);
-    $("#ed-mode").value = mode;
-    cm.setMode(mode);
-    cm.setIndent(CodeEditor.detectIndent(r.content, mode));
-    cm.setReadOnly(!r.editable);
-    edText.value = r.content;
-    edText.scrollTop = 0; edText.scrollLeft = 0;
-    cm.refresh();
-    if (r.binary) edOutput("Binary file – cannot be displayed.", "", "🔒 Binary");
-    else if (r.tooLarge) edOutput(`The file is too large (${fmtBytes(r.size)}) to display.`, "", "🔒 Too large");
-    else if (r.encodingError) edOutput("The file is not UTF-8 encoded – read-only.", "", "🔒 Encoding");
-    else if (!r.editable) edOutput("This file type is not editable by configuration (EDIT_EXTENSIONS / EDIT_FILENAMES) – read-only.", "", "🔒 Read-only");
-    else edOutput("");
-    if (!WIDE.matches) treeShow(false);
-    treeRender();
+    const t = { path: r.path, info: r, hash: r.hash, orig: r.content, text: r.content, eol: r.eol, backup: null, out: null };
+    ed.tabs.push(t);
+    if (activate) {
+      tabActivate(t);
+      if (!WIDE.matches) treeShow(false);
+    } else tabsRender();
+    tabsPersist();
   } catch (e) {
     if (!quiet) edOutput(`Could not open: ${e.message}`, "err");
-    else edEmpty();
+    else if (!ed.tab && !ed.tabs.length) edEmpty();
   } finally {
     ed.busy = false; edUpdate();
   }
 }
 
 function closeEditor(fromPopstate = false) {
-  if (!fromPopstate && edDirty() && !confirm("Unsaved changes – leave without saving?")) return;
-  ed.path = null; ed.info = null;
+  if (!fromPopstate && anyDirty() && !confirm(dirtyLeaveMsg())) return;
+  tabsPersist();  // the tabs are reopened next time
+  ed.tabs = []; ed.tab = null; ed.path = null; ed.info = null;
+  tabsRender();
   findClose(false);
   $("#editor").classList.add("hidden");
   $("#editor").setAttribute("aria-hidden", "true");
@@ -191,12 +307,17 @@ function closeEditor(fromPopstate = false) {
   if (!fromPopstate && history.state?.editor) history.back();
 }
 
+const dirtyLeaveMsg = () => {
+  const n = ed.tabs.filter(tabDirty).length;
+  return `${n} tab${n > 1 ? "s" : ""} with unsaved changes – leave without saving?`;
+};
+
 // Android "back" button (called from the popstate handler in app.js)
 function editorPopstate() {
   if (!WIDE.matches && !$("#ed-tree").classList.contains("hidden") && ed.path) {
     treeShow(false);  // on phones close the file list first
     history.pushState({ editor: true }, "");
-  } else if (edDirty() && !confirm("Unsaved changes – leave without saving?")) {
+  } else if (anyDirty() && !confirm(dirtyLeaveMsg())) {
     history.pushState({ editor: true }, "");
   } else closeEditor(true);
 }
@@ -251,7 +372,6 @@ function treeRender() {
 
 // new file in the current directory (only whitelisted types, never overwrites)
 async function newFile() {
-  if (edDirty() && !confirm("Unsaved changes – discard them?")) return;
   const where = (ed.root || "") + (ed.dir ? "/" + ed.dir : "");
   const name = (prompt(`New file in ${where}\n\nFile name (e.g. docker-compose-myapp.yaml, .env-myapp, haproxy.cfg):`) || "").trim();
   if (!name) return;
@@ -259,11 +379,75 @@ async function newFile() {
     const r = await api("api/fs/new", jsonPost({ dir: ed.dir, name }));
     toast(`${name} created`);
     await treeLoad(ed.dir);
-    ed.info = null;  // the dirty check was answered above
     await edOpen(r.path);
     if (/^docker-compose-.+\.ya?ml$/.test(name) && !ed.dir) loadProjects();  // new stack
   } catch (e) {
     alert(`Could not create ${name}:\n${e.message}`);
+  }
+}
+
+// duplicate / delete (delete = moved into the server-side trash, never removed for good)
+function treeToolsUpdate() {
+  $("#tree-dup").disabled = ed.busy || !ed.path;
+  $("#tree-del").disabled = ed.busy || !ed.path;
+  $("#tree-deldir").disabled = ed.busy || !ed.dir;
+}
+
+function copyName(name) {
+  const i = name.lastIndexOf(".");
+  return i > 0 ? `${name.slice(0, i)}-copy${name.slice(i)}` : `${name}-copy`;  // .env-x -> .env-x-copy
+}
+
+async function duplicateFile() {
+  if (!ed.path || ed.busy) return;
+  if (edDirty() && !confirm("The copy is made from the file on disk – unsaved changes are not included. Continue?")) return;
+  const src = ed.path;
+  const name = (prompt(`Duplicate ${src}\n\nName of the copy (same directory):`, copyName(src.split("/").pop())) || "").trim();
+  if (!name) return;
+  try {
+    const r = await api("api/fs/duplicate", jsonPost({ path: src, name }));
+    toast(`${name} created`);
+    await treeLoad(ed.dir);
+    await edOpen(r.path);
+    if (/^docker-compose-.+\.ya?ml$/.test(name) && !ed.dir) loadProjects();
+  } catch (e) {
+    alert(`Could not duplicate:\n${e.message}`);
+  }
+}
+
+async function deletePath(path, isDir) {
+  const name = path.split("/").pop();
+  const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+  let recursive = false;
+  const stacks = !isDir ? ed.info?.stacks || [] : [];
+  const under = ed.tabs.filter((t) => t.path === path || t.path.startsWith(path + "/"));
+  const lose = under.filter(tabDirty).length ? `\n\n⚠ Unsaved changes in ${under.filter(tabDirty).map((t) => baseName(t.path)).join(", ")} will be lost.` : "";
+  if (isDir) {
+    if (!confirm(`Delete the directory "${path}"?${lose}\n\nIt is moved to the trash (${ed.root}/.compose-manager-backup/.trash), not erased.`)) return;
+  } else {
+    const note = (stacks.length ? `\n\n⚠ Used by: ${stacks.join(", ")}` : "") + lose;
+    if (!confirm(`Delete "${path}"?${note}\n\nIt is moved to the trash (${ed.root}/.compose-manager-backup/.trash), not erased.`)) return;
+  }
+  ed.busy = true; edUpdate();
+  try {
+    let r;
+    try {
+      r = await api("api/fs/delete", jsonPost({ path, recursive }));
+    } catch (e) {
+      if (!(e.status === 409 && e.body?.nonEmpty)) throw e;
+      if (!confirm(`"${path}" is NOT empty (${e.body.count}${e.body.count >= 100000 ? "+" : ""} entries).\n\nDelete it with everything inside?`)) return;
+      r = await api("api/fs/delete", jsonPost({ path, recursive: true }));
+    }
+    toast(`${name} deleted`);
+    under.forEach((t) => tabClose(t, true));  // the files are gone
+    if (isDir && (ed.dir === path || ed.dir.startsWith(path + "/"))) await treeLoad(parent);
+    else await treeLoad(ed.dir);
+    if (!path.includes("/")) loadProjects();  // may have been a stack file
+    else if (ed.project) loadProjects();
+  } catch (e) {
+    alert(`Could not delete:\n${e.message}`);
+  } finally {
+    ed.busy = false; edUpdate();
   }
 }
 
@@ -293,11 +477,33 @@ async function edSave(thenUp = false, force = false) {
       if (confirm("Validation reported an error (see below). Save anyway?")) return edSave(thenUp, true);
       return;
     }
-    edOutput(e.status === 409 ? `${e.message}\n(Reopen the file to get the current content – your changes will be lost.)` : `Save error: ${e.message}`, "err");
+    edOutput(e.status === 409 ? `${e.message}\n(Use Discard to reload the file from disk – your changes will be lost.)` : `Save error: ${e.message}`, "err");
   } finally {
     ed.busy = false; edUpdate();
   }
   if (saved && thenUp) await edUp();
+}
+
+// throw away the changes: reload the file from disk (also picks up changes made elsewhere)
+async function edDiscard() {
+  if (!ed.tab || ed.busy || !ed.info?.editable) return;
+  if (edDirty() && !confirm(`Discard the unsaved changes in ${baseName(ed.path)}?`)) return;
+  const tab = ed.tab;
+  ed.busy = true; edUpdate();
+  try {
+    const r = await api(`api/fs/file?${qs({ path: ed.path })}`);
+    if (tab !== ed.tab) return;
+    tab.info = ed.info = r; ed.hash = r.hash; ed.orig = r.content; ed.eol = r.eol; ed.backup = null;
+    edText.value = r.content;
+    cm.setReadOnly(!r.editable);
+    cm.refresh();
+    edOutput(...(infoNotice(r) || [""]));
+    if (!$("#ed-backups").classList.contains("hidden")) edBackups();
+  } catch (e) {
+    edOutput(`Could not reload the file: ${e.message}`, "err");
+  } finally {
+    ed.busy = false; edUpdate();
+  }
 }
 
 async function edUp() {
@@ -526,6 +732,19 @@ $("#ed-close").addEventListener("click", () => closeEditor());
 $("#ed-tree-btn").addEventListener("click", () => treeShow($("#ed-tree").classList.contains("hidden")));
 $("#ed-file").addEventListener("change", (e) => edOpen(e.target.value));
 $("#ed-save").addEventListener("click", () => edSave());
+$("#ed-discard").addEventListener("click", edDiscard);
+$("#ed-tabs").addEventListener("click", (e) => {
+  if (ed.busy) return;
+  if (e.target.closest("[data-closeall]")) return tabsCloseClean();
+  const x = e.target.closest("[data-close]");
+  if (x) return tabClose(ed.tabs[+x.dataset.close]);
+  const t = e.target.closest("[data-tab]");
+  if (t) tabActivate(ed.tabs[+t.dataset.tab]);
+});
+$("#ed-tabs").addEventListener("auxclick", (e) => {  // middle click closes
+  const t = e.target.closest("[data-tab]");
+  if (e.button === 1 && t && !ed.busy) { e.preventDefault(); tabClose(ed.tabs[+t.dataset.tab]); }
+});
 $("#ed-save-up").addEventListener("click", () => edSave(true));
 $("#ed-check").addEventListener("click", edCheck);
 $("#ed-mode").addEventListener("change", (e) => {
@@ -567,4 +786,7 @@ $("#tree-only-edit").addEventListener("change", (e) => {
 });
 $("#tree-refresh").addEventListener("click", () => treeLoad(ed.dir));
 $("#tree-new").addEventListener("click", newFile);
-window.addEventListener("beforeunload", (e) => { if (edDirty()) e.preventDefault(); });
+$("#tree-dup").addEventListener("click", duplicateFile);
+$("#tree-del").addEventListener("click", () => { if (ed.path) deletePath(ed.path, false); });
+$("#tree-deldir").addEventListener("click", () => { if (ed.dir) deletePath(ed.dir, true); });
+window.addEventListener("beforeunload", (e) => { if (anyDirty()) e.preventDefault(); });

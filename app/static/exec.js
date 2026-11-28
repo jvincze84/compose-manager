@@ -156,7 +156,6 @@ $("#term-keys").addEventListener("click", (e) => {
   if (!b || !ex.term) return;
   const k = b.dataset.key;
   if (k === "ctrl") ex.term.setCtrl(!ex.term.ctrlOnce);
-  else if (k === "font-down" || k === "font-up") execFont(k === "font-up" ? 1 : -1);
   else if (k === "paste") {
     // needs a secure context (HTTPS / localhost) and the user's permission
     navigator.clipboard?.readText().then((t) => { if (t) ex.term.paste(t); })
@@ -178,6 +177,9 @@ function execFont(step) {
   localStorage.setItem(TERM_FONT_KEY, next);
   requestAnimationFrame(() => term.fit());
 }
+
+$("#term-font-down").addEventListener("click", () => { execFont(-1); ex.term?.focus(); });
+$("#term-font-up").addEventListener("click", () => { execFont(1); ex.term?.focus(); });
 
 const execRoot = () => $("#term-root").getAttribute("aria-pressed") === "true";
 function execSetRoot(on) {

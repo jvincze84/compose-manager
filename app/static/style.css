@@ -151,9 +151,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .logoutput {
   flex: 1; margin: 0; padding: 10px 12px; overflow: auto;
-  font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; color: #cbd5e1;
+  font: var(--log-size, 12px)/1.4 ui-monospace, Menlo, Consolas, monospace; color: #cbd5e1;
   -webkit-overflow-scrolling: touch;
 }
+.fsz { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 0.8rem; }
+.fsz .big { font-size: 1.15rem; }
+.fsz input { width: 110px; accent-color: var(--blue); }
 .logoutput.wrap { white-space: pre-wrap; word-break: break-all; }
 .logoutput .lp { color: #60a5fa; }
 .logoutput .le { color: #f87171; }
@@ -419,6 +422,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .crumbs span { color: var(--muted); }
 .tree-tools { display: flex; gap: 6px; }
 #tree-new { color: var(--green); white-space: nowrap; }
+.tree-acts button { white-space: nowrap; }
+.tree-acts .danger:not(:disabled) { color: var(--red); }
+.tree-acts button:disabled { opacity: 0.4; cursor: default; }
 .tree-tools input {
   flex: 1; min-width: 0; padding: 6px 10px; border-radius: 8px; font-size: 16px;
   background: var(--bg); color: var(--text); border: 1px solid var(--border);
@@ -526,3 +532,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #term-reconnect { color: var(--green); }
 #term-root { font-family: ui-monospace, Menlo, Consolas, monospace; }
 #term-root.active { color: var(--red); border-color: var(--red); background: rgba(239, 68, 68, 0.12); }
+
+/* ---------- editor tabs ---------- */
+.ed-tabs { flex: none; display: flex; overflow-x: auto; background: var(--card); border-bottom: 1px solid var(--border); scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+.etab {
+  flex: none; display: flex; align-items: center; gap: 4px; max-width: 220px; cursor: pointer;
+  padding: 0 4px 0 12px; min-height: 36px; border-right: 1px solid var(--border);
+  font-size: 0.85rem; color: var(--muted); user-select: none;
+}
+.etab.active { color: var(--text); background: var(--bg); box-shadow: inset 0 -2px 0 var(--blue); }
+.etab .en { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.etab.dirty .en::before { content: "● "; color: #facc15; }
+.etab .ex { background: none; border: 0; color: var(--muted); width: 28px; height: 28px; border-radius: 6px; font-size: 0.8rem; }
+.etab .ex:hover { background: var(--card2); color: var(--text); }
+#ed-discard:not(:disabled) { color: #fbbf24; }
+#ed-discard:disabled { opacity: 0.4; }
+@media (max-width: 520px) { #ed-discard .lbl { display: none; } }
+.etabs-all {
+  flex: none; position: sticky; right: 0; margin-left: auto; padding: 0 12px; border: 0;
+  border-left: 1px solid var(--border); background: var(--card); color: var(--muted); font-size: 0.8rem;
+}
+.etabs-all:hover { color: var(--text); background: var(--card2); }

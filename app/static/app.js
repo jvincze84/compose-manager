@@ -555,6 +555,32 @@ $("#log-tail").addEventListener("change", startLogStream);
 $("#log-follow").addEventListener("change", startLogStream);
 $("#log-wrap").addEventListener("change", (e) => $("#log-output").classList.toggle("wrap", e.target.checked));
 $("#log-output").classList.toggle("wrap", $("#log-wrap").checked);
+const LOG_FONT_KEY = "logFont";
+function setLogFont(px) {
+  $("#log-output").style.setProperty("--log-size", `${px}px`);
+  $("#log-font").value = px;
+  localStorage.setItem(LOG_FONT_KEY, px);
+}
+setLogFont(+localStorage.getItem(LOG_FONT_KEY) || (matchMedia("(max-width: 720px)").matches ? 12 : 13));
+$("#log-font").addEventListener("input", (e) => {
+  const out = $("#log-output");
+  const stick = atBottom(out);
+  setLogFont(+e.target.value);
+  if (stick) out.scrollTop = out.scrollHeight;
+});
+$("#log-download").addEventListener("click", () => {
+  const text = $("#log-output").textContent;
+  if (!text.trim()) { toast("Nothing to download", true); return; }
+  const svc = $("#log-service").value;
+  const ts = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+  a.download = `${log.name}${svc ? "-" + svc : ""}-${ts}.log`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+});
 $("#log-bottom").addEventListener("click", () => { const o = $("#log-output"); o.scrollTop = o.scrollHeight; });
 // the Android "back" button closes the log view / editor / shell
 window.addEventListener("popstate", () => {

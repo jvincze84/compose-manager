@@ -14,6 +14,8 @@ import pty
 import re
 import secrets
 import shlex
+import shutil
+import stat
 import struct
 import termios
 import time
@@ -1187,6 +1189,100 @@ async def api_fs_new(body: FileNew):
     except OSError:
         pass
     return {"ok": True, "path": rel}
+
+
+class FileDelete(BaseModel):
+    path: str
+    recursive: bool = False   # required for a non-empty directory
+
+
+def trash_root() -> Path:
+    root = Path(COMPOSE_DIR, BACKUP_DIR_NAME)
+    root.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(root, 0o700)
+    t = root / ".trash"
+    t.mkdir(mode=0o700, exist_ok=True)
+    return t
+
+
+def count_entries(p: Path, cap: int = 100000) -> int:
+    n = 0
+    for _, dirs, files in os.walk(p, followlinks=False):
+        n += len(dirs) + len(files)
+        if n >= cap:
+            break
+    return n
+
+
+@app.post("/api/fs/delete")
+async def api_fs_delete(body: FileDelete):
+    """'Delete' a file or directory = MOVE it into COMPOSE_DIR/.compose-manager-backup/.trash/<id>/<path>.
+    Nothing is ever removed for good, so every delete can be undone from the host."""
+    p, rel = resolve_rel(body.path)
+    if not rel:
+        raise HTTPException(400, "The root directory cannot be deleted")
+    try:
+        st = os.lstat(p)
+    except FileNotFoundError:
+        raise HTTPException(404, "No such file or directory")
+    is_dir = stat.S_ISDIR(st.st_mode)  # a symlink to a directory counts as a link (only the link moves)
+    count = 0
+    if is_dir:
+        if os.path.ismount(p):
+            raise HTTPException(400, "This directory is a mount point")
+        count = count_entries(p)
+        if count and not body.recursive:
+            return JSONResponse({"detail": f"The directory is not empty ({count} entries)",
+                                 "nonEmpty": True, "count": count}, status_code=409)
+    dest = trash_root() / datetime.now().strftime("%Y%m%d-%H%M%S-%f") / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.rename(p, dest)
+    except OSError as e:
+        raise HTTPException(409, f"Cannot move to the trash: {e.strerror}")
+    return {"ok": True, "path": rel, "dir": is_dir, "count": count,
+            "trash": str(dest.relative_to(Path(COMPOSE_DIR)))}
+
+
+class FileDuplicate(BaseModel):
+    path: str   # existing file
+    name: str   # plain new file name, same directory
+
+
+@app.post("/api/fs/duplicate")
+async def api_fs_duplicate(body: FileDuplicate):
+    """Copy a file to a new name in the same directory. Never overwrites."""
+    name = body.name.strip()
+    if not name or name in (".", "..") or "/" in name or "\x00" in name or name.startswith(".cm-tmp-"):
+        raise HTTPException(400, "Invalid file name")
+    if not is_editable_name(name):
+        raise HTTPException(403, "This file type is not editable (EDIT_EXTENSIONS / EDIT_FILENAMES)")
+    src, rel = resolve_rel(body.path)
+    if not src.is_file():
+        raise HTTPException(404, "No such file")
+    rel_dir = rel.rpartition("/")[0]
+    if not rel_dir and name == BACKUP_DIR_NAME:
+        raise HTTPException(400, "Invalid file name")
+    dst, new_rel = resolve_rel(f"{rel_dir}/{name}" if rel_dir else name)
+    sst = src.stat()
+    try:
+        fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(sst.st_mode))
+    except FileExistsError:
+        raise HTTPException(409, "A file with this name already exists")
+    except OSError as e:
+        raise HTTPException(403, f"Cannot create file: {e.strerror}")
+    try:
+        with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
+            shutil.copyfileobj(inp, out)
+        os.chmod(dst, stat.S_IMODE(sst.st_mode))  # not reduced by the umask
+    except OSError as e:
+        dst.unlink(missing_ok=True)
+        raise HTTPException(500, f"Copy failed: {e.strerror}")
+    try:
+        os.chown(dst, sst.st_uid, sst.st_gid)
+    except OSError:
+        pass
+    return {"ok": True, "path": new_rel}
 
 
 @app.put("/api/fs/file")
